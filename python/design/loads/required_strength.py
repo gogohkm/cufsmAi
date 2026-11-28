@@ -107,8 +107,10 @@ def analyze_loads(
             단면끼리 'S1', 'S2' … 를 붙인다). 주면:
               - 경간별 Ix = 그 경간 단면의 Ixx (I_span_in4 를 따로 주면 그 값을 쓰고, 단면의 Ixx 와 1 % 넘게 다른
                 경간마다 경고 — 결정 S6). 모든 단면의 Ixx 가 같으면 Ix 하나(오늘과 같은 길).
-              - 데크 kφ · kx, §I6.2.1 조건과 양력 R 을 경간마다 그 단면으로(결정 S7) — auto_params.deck_by_span,
-                i621_by_span, uplift_R_by_span. 구간 기록마다 span · spans(0 부터), 랩 구간은 두 부재 · 강성 몫.
+              - §I6.2.1 조건과 양력 R 을 경간마다 그 단면으로(결정 S7) — auto_params.i621_by_span, uplift_R_by_span.
+              - 데크 kφ · kx 는 한 번(결정 S7′ — 쓰이는 단면 가운데 kφ 가 가장 작은 단면, 설계 매뉴얼 II-1C 의 안전측 근사):
+                auto_params.deck 가 그 값, auto_params.deck_basis {rule, section_id, by_section(단면마다 — 참고)}.
+              - 구간 기록마다 span · spans(0 부터), 랩 구간은 두 부재 · 강성 몫(참고 — 판정은 두 부재 강도의 합, 결정 S3′).
               - section 을 주지 않으면 section = span_sections[0] (옛 단일 키 — deck, i621_check, deflection.Ixx — 의 단면).
             없으면 결과는 오늘과 바이트까지 같다. 모든 경간에 같은 단면이면 옛 키의 값은 section 하나와 같다.
 
@@ -241,7 +243,13 @@ def analyze_loads(
                                      pattern_on, snow_cases)
 
     # ── 데크 강성 ──
-    deck_info = _calc_deck_info(deck, section, E=E)
+    deck_basis = None
+    if span_secs is None:
+        deck_info = _calc_deck_info(deck, section, E=E)
+    else:
+        # 결정 S7′(2026-11-28 오후): 데크 강성은 한 번 계산해 모든 경간에 — 쓰이는 단면 가운데 kφ 가 가장 작은 단면의 값
+        # (설계 매뉴얼 II-1C: 얇은 퍼린으로 한 번, 「안전측의 근사」). 데크의 모든 값이 그 한 단면에서. 단면마다의 값은 참고
+        deck_info, deck_basis = _deck_once(deck, span_secs, E)
     warnings.extend(deck_info.get('warnings', []))
     assumptions.extend(deck_info.get('assumptions', []))
     scope_notes.extend(deck_info.get('scope_notes', []))
@@ -251,14 +259,10 @@ def analyze_loads(
     geo = None
     I_used = None
     if span_secs is not None:
-        # 결정 S7: 데크 kφ · kx 를 경간마다 그 단면으로. auto_params.deck 는 section(없으면 첫 경간)의 값 그대로
-        deck_by_span = []
-        for i, s in enumerate(span_secs):
-            di = _calc_deck_info(deck, s, E=E)
-            for lst, key in ((warnings, 'warnings'), (assumptions, 'assumptions'), (scope_notes, 'scope_notes')):
-                lst.extend(x for x in di.get(key, []) if x not in lst)
-            deck_by_span.append({'span': i, 'section_id': s['id'], **di})
-        auto_params['deck_by_span'] = deck_by_span
+        auto_params['deck_basis'] = deck_basis
+        if secs_differ and deck_type != 'none':
+            assumptions.append(_nt('loads.assumption.deck_once_smallest_kphi', section_id=deck_basis['section_id'],
+                                   kphi=float((deck_info.get('display_unrounded') or {}).get('kphi', deck_info['kphi']))))
         geo = span_geometry(spans, laps_ps if has_laps else None, sup)
         I_used = list(I_span_in4) if I_span_in4 is not None else list(sec_I)
     x_list = units['x'].tolist()
@@ -395,12 +399,12 @@ def analyze_loads(
                                         left=span_secs[j - 1]['id'], right=span_secs[j]['id']))
             shared = [lp for lp in auto_params['span_map']['laps'] if not lp['same_section']]
             if shared:
-                assumptions.append(_nt('loads.assumption.lap_stiffness_share'))
+                assumptions.append(_nt('loads.assumption.lap_sum_of_strengths'))
             for lp in auto_params['span_map']['laps']:
                 if lp['depth_mismatch']:
                     warnings.append(_nt('loads.warning.lap_depth_mismatch', support=lp['support'] + 1,
                                         d_left=lp['depths'][0], d_right=lp['depths'][1]))
-                if lp['shares'] is None:
+                if lp['stiffness_shares'] is None:
                     warnings.append(_nt('loads.warning.lap_shares_need_ixx', support=lp['support'] + 1))
 
     # ── 반력 ──
@@ -1415,8 +1419,37 @@ def _span_keys(g: dict) -> dict:
     return {k: g[k] for k in ('span', 'spans') if k in g}
 
 
+def _deck_once(deck, span_secs, E):
+    """결정 S7′: 데크 강성 한 번 — 쓰이는 단면(나온 차례)마다 _calc_deck_info, 그 가운데 kφ 가 가장 작은 단면(같으면 kx 가
+    작은 쪽, 그다음 앞의 단면)의 결과 전부를 모든 경간에. 반환: (그 데크 결과, deck_basis {rule, section_id, by_section}).
+    by_section 은 단면마다의 값(참고 — 해석에 쓰지 않음)."""
+    rows = []
+    infos = {}
+    for i, s in enumerate(span_secs):
+        sid = s['id']
+        if sid in infos:
+            next(r for r in rows if r['section_id'] == sid)['spans'].append(i)
+            continue
+        di = _calc_deck_info(deck, s, E=E)
+        infos[sid] = di
+        rows.append({'section_id': sid, 'spans': [i], 'kphi': di['kphi'], 'kx': di['kx'],
+                     'kphi_method': di['kphi_method'], 'kx_method': di['kx_method']})
+
+    def raw(di, k):
+        return float((di.get('display_unrounded') or {}).get(k, di.get(k) or 0.0))
+    pick = min(range(len(rows)), key=lambda j: (raw(infos[rows[j]['section_id']], 'kphi'),
+                                               raw(infos[rows[j]['section_id']], 'kx'), j))
+    sid = rows[pick]['section_id']
+    for j, r in enumerate(rows):
+        r['adopted'] = j == pick
+    return infos[sid], {'rule': 'once_smallest_kphi', 'section_id': sid,
+                        'reference': 'Design Manual Example II-1C — computed once with the thinner purlin '
+                                     '(conservative approximation)',
+                        'by_section': rows}
+
+
 def _lap_shares(span_secs, I_used, a, b):
-    """랩의 두 부재(경간 a, b)의 강성 몫 [s_a, s_b] (반올림 없음) — 결정 S3: M_i = M · I_i / (I_a + I_b).
+    """랩의 두 부재(경간 a, b)의 강성 몫 [s_a, s_b] (반올림 없음) — 참고값(결정 S3′: 랩의 강도는 두 부재 강도의 합).
     I 는 해석에 쓴 경간별 Ix(I_span_in4 또는 단면의 Ixx). Ix 가 없고 두 단면이 같으면 [0.5, 0.5], 아니면 None."""
     Ia = I_used[a] if I_used else None
     Ib = I_used[b] if I_used else None
@@ -1428,7 +1461,8 @@ def _lap_shares(span_secs, I_used, a, b):
 
 
 def _lap_member_sections(r: dict, span_secs, I_used) -> None:
-    """랩 구간 기록(tag_region_spans 가 lap_members 를 단 것)에 두 부재의 단면 · Ix · 강성 몫을 단다."""
+    """랩 구간 기록(tag_region_spans 가 lap_members 를 단 것)에 두 부재의 단면 · Ix · 강성 몫(참고)을 단다.
+    결정 S3′: 랩의 판정은 두 부재 강도의 합(strength_basis) — 강도는 부재 검토가 내므로 여기에는 그 근거만."""
     mem = r.get('lap_members')
     if not mem:
         return
@@ -1439,20 +1473,18 @@ def _lap_member_sections(r: dict, span_secs, I_used) -> None:
         m['Ixx'] = I
         m['depth'] = s.get('depth')
         m['thickness'] = s.get('thickness')
-        m['share'] = shares[k] if shares else None
+        m['stiffness_share'] = shares[k] if shares else None
     da, db = span_secs[a].get('depth'), span_secs[b].get('depth')
     mismatch = bool(da and db and abs(float(da) - float(db)) > 1e-6 * max(float(da), float(db)))
     r['Ixx_members'] = [Ia, Ib]
     r['share_by_stiffness'] = shares
-    r['share_basis'] = 'stiffness_Ix'           # 결정 S3 (설계 가정 — 기준에 식이 없다)
-    r['reference_basis'] = 'sum_of_strengths'   # Design Manual II-1A · II-2A 가정 (c) — 참고값
+    r['strength_basis'] = 'sum_of_strengths'    # Design Manual II-1A · II-2A 가정 (c) — 결정 S3′
+    r['reference_basis'] = 'stiffness_share'    # 강성 몫 I_i / (I_1 + I_2) — 참고값(판정에 쓰지 않음)
     r['same_section'] = _same_section(span_secs[a], span_secs[b])
     r['depth_mismatch'] = mismatch
-    r['lap_evaluable'] = not mismatch and shares is not None
+    r['lap_evaluable'] = not mismatch
     if mismatch:
         r['not_evaluable_reason'] = _nt('loads.reason.lap_depth_mismatch', d_left=float(da), d_right=float(db))
-    elif shares is None:
-        r['not_evaluable_reason'] = _nt('loads.reason.lap_shares_need_ixx')
 
 
 def _uplift_positive_pieces(ubu, lap_regions, geo, span_secs, I_used):
@@ -1530,7 +1562,7 @@ def _span_map(geo, span_secs, I_used, sec_I):
         shares, Ia, Ib = _lap_shares(span_secs, I_used, a, b)
         da, db = span_secs[a].get('depth'), span_secs[b].get('depth')
         laps.append({**lp, 'section_ids': [span_secs[a]['id'], span_secs[b]['id']], 'Ixx_members': [Ia, Ib],
-                     'shares': shares, 'depths': [da, db], 'same_section': _same_section(span_secs[a], span_secs[b]),
+                     'stiffness_shares': shares, 'depths': [da, db], 'same_section': _same_section(span_secs[a], span_secs[b]),
                      'depth_mismatch': bool(da and db and abs(float(da) - float(db)) > 1e-6 * max(float(da), float(db)))})
     return {
         'supports_ft': geo['supports_ft'],

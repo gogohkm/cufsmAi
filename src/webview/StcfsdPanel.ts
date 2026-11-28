@@ -5744,25 +5744,18 @@ export class StcfsdPanel implements McpPanelInterface {
                 holesGiven: 'node' in baseDesign, dsmNeg: neg.dsm, negSig: neg,
                 pos: new Map([['*', { key: '*', kphi: deckInfo.kphi || 0, kx: deckInfo.kx || 0, springs: posSprings, dsm: pos.dsm, sig: pos, spans: [] }]]), spans: [] });
         } else {
-            // 결정 S1 · S7: 단면마다 — 부모멘트(스프링 없음) 좌굴값 하나, 정모멘트는 그 단면을 쓰는 경간의 데크 강성마다(deck_by_span) 하나.
+            // 결정 S1 · S7′: 단면마다 — 부모멘트(스프링 없음) 좌굴값 하나, 정모멘트도 하나. 데크 강성은 엔진이 한 번 정한 값
+            // (auto_params.deck — 쓰이는 단면 가운데 kφ 가 가장 작은 단면의 것, 설계 매뉴얼 II-1C 의 안전측 근사)을 모든 단면 · 경간에.
             // 단면 · 스프링 · Fy 가 같으면 다시 풀지 않는다(_purlinSignature)
-            const deckBy: any[] = Array.isArray(ap.deck_by_span) ? ap.deck_by_span : [];
+            const kphi = Number(deckInfo.kphi) || 0, kx = Number(deckInfo.kx) || 0;
             for (const x of multi.list) {
                 const tag = x.id === 'S1' ? '' : `[${x.id}] `;
                 const spansOf = multi.ids.map((id, i) => (id === x.id ? i : -1)).filter((i) => i >= 0);
-                const pos = new Map<string, PosGroup>();
-                for (const i of spansOf) {
-                    const d = deckBy.find((g) => g && g.span === i) || deckBy[i] || deckInfo;
-                    const kphi = Number(d?.kphi) || 0, kx = Number(d?.kx) || 0;
-                    const key = `${kphi}|${kx}`;
-                    const g = pos.get(key);
-                    if (g) { g.spans.push(i); continue; }
-                    const springs = this._deckSpringsForFlange(x.model, kphi, kx, 'top');
-                    const sig = await this._purlinSignature(x.model, 'bending_xx_pos', fy, springs);
-                    warnings.push(...sig.warnings.map((w: string) => tag + w));
-                    if (sig.classificationNote && !assumptions.includes(sig.classificationNote)) { assumptions.push(sig.classificationNote); }
-                    pos.set(key, { key, kphi, kx, springs, dsm: sig.dsm, sig, spans: [i] });
-                }
+                const springs = this._deckSpringsForFlange(x.model, kphi, kx, 'top');
+                const sig = await this._purlinSignature(x.model, 'bending_xx_pos', fy, springs);
+                warnings.push(...sig.warnings.map((w: string) => tag + w));
+                if (sig.classificationNote && !assumptions.includes(sig.classificationNote)) { assumptions.push(sig.classificationNote); }
+                const pos = new Map<string, PosGroup>([['*', { key: '*', kphi, kx, springs, dsm: sig.dsm, sig, spans: [...spansOf] }]]);
                 const neg = await this._purlinSignature(x.model, 'bending_xx_neg', fy, []);
                 warnings.push(...neg.warnings.map((w: string) => tag + w));
                 if (neg.classificationNote && !assumptions.includes(neg.classificationNote)) { assumptions.push(neg.classificationNote); }
@@ -5777,12 +5770,8 @@ export class StcfsdPanel implements McpPanelInterface {
             else { const pr = await this._sectionProps(baseModel); s1Props = pr.props; s1Cutwp = pr.cutwp; }
         }
         const S1 = ctxs.get('S1') as SecCtx;
-        /** 정모멘트(상부 압축) 좌굴값의 묶음 — 단면 · 그 경간의 데크 강성 */
-        const posGroupOf = (sec: SecCtx, span: number | null): PosGroup => {
-            if (!multi) { return sec.pos.get('*') as PosGroup; }
-            for (const g of sec.pos.values()) { if (span !== null && g.spans.includes(span)) { return g; } }
-            return [...sec.pos.values()][0];
-        };
+        /** 정모멘트(상부 압축) 좌굴값의 묶음 — 단면마다 하나(결정 S7′: 데크 강성은 모든 경간에 한 값) */
+        const posGroupOf = (sec: SecCtx, _span: number | null): PosGroup => sec.pos.get('*') as PosGroup;
         // 단일 단면 길의 값(지금까지의 이름 — 결과의 dsm_positive · dsm_negative · props · cutwp).
         // 검증 2026-11-28 의 7: 맨 위의 단면 값은 모두 한 단면의 것 — 어느 경간이 S1 을 쓰면 S1, 아니면 첫 경간의 단면(top_level_section_id 가 그 id)
         const firstSec = multi ? (ctxs.get(multi.ids[0]) as SecCtx) : S1;
@@ -6000,12 +5989,14 @@ export class StcfsdPanel implements McpPanelInterface {
         }
 
         /**
-         * 결정 S1 · S3 · S4: 구간을 검토할 부재(단면 · 몫). 단일 단면 길: 모델 하나(랩은 두 부재가 절반씩 — 지금까지 그대로).
-         * 경간마다 단면: 랩 = 엔진의 두 부재(lap_members — 단면 · 강성의 몫 · 경간), 춤이 다르면(lap_evaluable false) 평가하지 못함.
+         * 결정 S1 · S3′ · S4: 구간을 검토할 부재(단면 · 몫). 단일 단면 길: 모델 하나(랩은 두 부재가 절반씩 — 지금까지 그대로).
+         * 경간마다 단면: 랩 = 엔진의 두 부재(lap_members — 단면 · 경간 · 강성의 몫(참고)), 춤이 다르면(lap_evaluable false) 평가하지 못함.
+         * 랩의 몫은 처음에 강성의 몫(없으면 절반 — 강도를 얻으려는 것뿐) — 아래에서 두 부재의 강도로 다시 나눈다(강도의 합, 설계 매뉴얼 가정 (c)).
          * 랩이 아닌 구간 = 그 구간에 있는 경간(spans)의 단면 — 둘 이상이면(랩 없이 단면이 바뀌는 지점을 지난다) 그 단면마다 구간 전체의 소요로
          * 검토하고 지배하는 것(약한 단면이 주지 않을 합격을 내지 않는다). 경간을 모르면 평가하지 못함.
+         * share = M 의 몫, shareV = V 의 몫(없으면 share), stiff = 강성의 몫(참고 — 없으면 null).
          */
-        type Member = { sec: SecCtx; share: number; span: number | null; role?: string };
+        type Member = { sec: SecCtx; share: number; shareV?: number; stiff?: number | null; span: number | null; role?: string };
         const membersOf = (rg: Region): { list: Member[]; why?: any; rule?: 'lap' | 'crosses_section_change' } => {
             if (!multi) { return { list: [{ sec: S1, share: rg.lap ? 0.5 : 1.0, span: null }] }; }
             const r = rg.src || {};
@@ -6016,10 +6007,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 const lm: any[] = Array.isArray(r.lap_members) ? r.lap_members : [];
                 if (lm.length !== 2 || lm.some((m) => !ctxs.has(String(m?.section_id)))) { return { list: [], why: NOTICES.hostNotice('host.purlin.lap_members_unknown') }; }
-                if (lm.some((m) => !(Number(m.share) > 0))) {
-                    return { list: [], why: NOTICES.siblingNotice(r, 'not_evaluable_reason') || NOTICES.hostNotice('host.purlin.lap_members_unknown') };
-                }
-                return { list: lm.map((m) => ({ sec: ctxs.get(String(m.section_id)) as SecCtx, share: Number(m.share), span: Number.isInteger(m.span) ? m.span : null, role: m.role })), rule: 'lap' };
+                // 강성의 몫은 참고값 — 없으면(두 부재의 Ix 를 모름) 절반으로 강도만 얻는다(판정은 아래의 강도의 몫으로)
+                const stiffOk = lm.every((m) => Number(m.stiffness_share) > 0);
+                return { list: lm.map((m) => ({ sec: ctxs.get(String(m.section_id)) as SecCtx, share: stiffOk ? Number(m.stiffness_share) : 0.5,
+                    stiff: stiffOk ? Number(m.stiffness_share) : null, span: Number.isInteger(m.span) ? m.span : null, role: m.role })), rule: 'lap' };
             }
             const spans: number[] = Array.isArray(r.spans) && r.spans.length ? r.spans.filter((j: any) => Number.isInteger(j)) : (Number.isInteger(r.span) ? [r.span] : []);
             if (!spans.length || spans.some((j) => !multi.ids[j])) { return { list: [], why: NOTICES.hostNotice('host.purlin.region_span_unknown') }; }
@@ -6076,7 +6067,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     combo: rg.env?.combo ?? null, beta_dist: null, i621_region_eligible: r.i621_region_eligible,
                     section_id: null, ...StcfsdPanel._spanKeysOf(r, multi),
                     ...(rg.lap && Array.isArray(r.lap_members) ? { lap_members: r.lap_members.map((m: any) => ({ section_id: m.section_id ?? null, span: m.span ?? null,
-                        role: m.role ?? null, share: m.share ?? null, depth: m.depth ?? null, thickness: m.thickness ?? null, pass: null, utilization: null })) } : {}),
+                        role: m.role ?? null, share: null, share_V: null, share_stiffness: m.stiffness_share ?? null, depth: m.depth ?? null, thickness: m.thickness ?? null,
+                        pass: null, utilization: null })), strength_basis: 'sum_of_strengths' } : {}),
                     not_evaluated_reason: NOTICES.render(why, { lang: 'en' }), ...NOTICES.attachField({}, 'not_evaluated_reason', why),
                     result: { pass: null, utilization: null, not_evaluated: [line], checks: [], design_checks: [] },
                 });
@@ -6086,6 +6078,8 @@ export class StcfsdPanel implements McpPanelInterface {
             const checkMember = async (m: Member): Promise<{ result: any; results: any[]; regionPass: boolean | null; notEvalRegion: string[] }> => {
                 const sec = m.sec;
                 const share = m.share;
+                // 결정 S3′: 랩의 V 몫은 전단 설계강도의 비(M 몫과 다를 수 있다) — 같으면 지금까지의 본문 그대로
+                const shareV = m.shareV ?? share;
                 const pg = posGroupOf(sec, m.span);
                 const dsm = this._dsmForDesign(null, rg.neg ? sec.dsmNeg : pg.dsm, fy, sign);
                 const params: any = { ...sec.baseDesign, dsm, moment_sign: sign };
@@ -6131,12 +6125,12 @@ export class StcfsdPanel implements McpPanelInterface {
                 calls.push({ tag: 'M_max', x_ft: xMmax,
                     ...StcfsdPanel._pairLabel(sA.m, vA !== undefined ? vSrcOf(atMmax ?? pV, sA.v) : null, null,
                         () => StcfsdPanel._demandCombination(rg.env, atMmax?.i, Mmax, vA, sign)),
-                    p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
+                    p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * shareV } : {}) } });
                 if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
                     const sB = StcfsdPanel._pointSources(rg.env, pV.i, sign);
                     calls.push({ tag: 'V_max', x_ft: pV.x,
                         ...StcfsdPanel._pairLabel(sB.m, vSrcOf(pV, sB.v), null, () => StcfsdPanel._demandCombination(rg.env, pV.i, pV.M, pV.V, sign)),
-                        p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
+                        p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * shareV } });
                 }
                 for (const s of sups) {
                     if (s.M_kipin === undefined) {
@@ -6152,7 +6146,7 @@ export class StcfsdPanel implements McpPanelInterface {
                             () => s.__combo ?? StcfsdPanel._demandCombination(rg.env, s.__envI, s.M_kipin / 12, s.V_kips, sign)), p: {
                         ...params, ...wcOpts,
                         Mu: s.M_kipin * share,
-                        ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
+                        ...(s.V_kips !== undefined ? { Vu: s.V_kips * shareV } : {}),
                         wc_P: s.__Pu, wc_support: s.case,
                         ...(s.M_kipin !== undefined ? { wc_M: s.M_kipin } : {}),
                     } });
@@ -6171,7 +6165,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         x: c.x_ft !== null && Number.isFinite(c.x_ft) ? { symbol: 'x', value: c.x_ft * 12, quantity: 'length' } : null,
                         demand_basis: c.basis,
                         // 결정 S1: 경간마다 단면이면 그 지점을 검토한 단면(랩이면 그 부재)
-                        ...(multi ? { section_id: sec.id, ...(mem.rule === 'lap' ? { member_share: share } : {}) } : {}),
+                        // 결정 S3′: 랩이면 그 부재의 몫(M — 휨 설계강도의 비, V 가 다르면 member_share_V — 전단 설계강도의 비)
+                        ...(multi ? { section_id: sec.id, ...(mem.rule === 'lap' ? { member_share: share, ...(shareV !== share ? { member_share_V: shareV } : {}) } : {}) } : {}),
                     };
                     let res: any;
                     try {
@@ -6201,7 +6196,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 // 그 지점의 위치 · 조합 · design_checks 를 덧붙인다 — 화면이 구간 안 어디서 어느 검토가 지배하는지 보이게.
                 // 지배 지점 · 판정 · 이용률은 바꾸지 않는다(위의 pick · regionPass 그대로).
                 const lapNoteN = rg.lap ? (multi
-                    ? NOTICES.hostNotice('host.purlin.lap_stiffness_share')
+                    ? NOTICES.hostNotice('host.purlin.lap_strength_share')
                     : NOTICES.hostNotice('host.purlin.lap_half_demand')) : null;
                 const { __location: _pl, __combination: _pc, ...pickClean } = pick || {};
                 void _pl; void _pc;
@@ -6221,20 +6216,93 @@ export class StcfsdPanel implements McpPanelInterface {
                 return { result, results, regionPass, notEvalRegion };
             };
             // 부재마다(같은 단면 · 같은 몫 · 같은 데크 강성이면 한 번)
+            type MemberRun = Array<{ m: Member; r: Awaited<ReturnType<typeof checkMember>> }>;
             const done = new Map<string, Awaited<ReturnType<typeof checkMember>>>();
-            const perMember: Array<{ m: Member; r: Awaited<ReturnType<typeof checkMember>> }> = [];
-            for (const m of mem.list) {
-                const key = `${m.sec.id}|${m.share}|${rg.neg ? '-' : posGroupOf(m.sec, m.span).key}`;
-                let rr = done.get(key);
-                if (!rr) { rr = await checkMember(m); done.set(key, rr); }
-                perMember.push({ m, r: rr });
-            }
+            const runMembers = async (list: Member[]): Promise<MemberRun> => {
+                const got: MemberRun = [];
+                for (const m of list) {
+                    const key = `${m.sec.id}|${m.share}|${m.shareV ?? m.share}|${rg.neg ? '-' : posGroupOf(m.sec, m.span).key}`;
+                    let rr = done.get(key);
+                    if (!rr) { rr = await checkMember(m); done.set(key, rr); }
+                    got.push({ m, r: rr });
+                }
+                return got;
+            };
             // 지배 부재: 불합격 → 판정 없음이 아님 → 큰 이용률(구간 대표 결과의 규칙과 같다)
-            const gov = [...perMember].sort((a, b) => {
+            const govOf = (run: MemberRun) => [...run].sort((a, b) => {
                 const fa = a.r.regionPass === false ? 1 : 0, fb = b.r.regionPass === false ? 1 : 0;
                 if (fa !== fb) { return fb - fa; }
                 return (Number(b.r.result?.utilization) || 0) - (Number(a.r.result?.utilization) || 0);
             })[0];
+            let perMember = await runMembers(mem.list);
+            /**
+             * 결정 S3′(설계 매뉴얼 II-1A · II-2A 의 가정 (c)): 랩 구간의 강도 = 두 부재 강도의 합 — Mu ≤ Σ φMn,i, Vu ≤ Σ φVn,i, §H2 도 합한 강도로.
+             * 공학은 엔진이 한다: 부재 i 가 강도의 몫 M_i = M · φMn,i / Σ φMn, V_i = V · φVn,i / Σ φVn 를 지고 엔진이 부재마다 검토한다 — 휨 비 = M / Σ φMn,
+             * 전단 비 = V / Σ φVn 가 두 부재에서 같고, §H2 는 합한 강도의 것(그 부재의 지배 휨강도가 §H2 의 Malo 가 아니면 큰 부재 비 — 조금 안전측).
+             * 강도는 소요에 달리지 않으므로 첫 검토(강성의 몫 — 참고)에서 얻고, 강도의 몫으로 다시 검토한 것이 판정이다. 두 몫이 같으면(같은 두 부재 —
+             * 모두 0.5) 다시 부르지 않는다. 한 부재의 강도를 얻지 못하면 그 랩 구간은 평가하지 못함(합격이 아니다).
+             */
+            let lapSum: any = null;
+            let lapRef: any = null;
+            let lapUnknown: { ids: string[]; fM: Array<number | null>; fV: Array<number | null> } | null = null;
+            if (mem.rule === 'lap') {
+                const first = perMember;
+                const fM = first.map((x) => StcfsdPanel._flexureStrength(x.r.results.find((y: any) => y.check_point === 'M_max')));
+                const needV = first.some((x) => x.r.results.some((y: any) => Number(y?.Vu_checked) > 0));
+                const fV = first.map((x) => StcfsdPanel._shearStrength(x.r.results));
+                if (first.every((x) => typeof x.m.stiff === 'number')) {
+                    const g0 = govOf(first);
+                    lapRef = { basis: 'stiffness_Ix', shares: first.map((x) => x.m.stiff),
+                        members: first.map((x) => ({ section_id: x.m.sec.id, share: x.m.share, pass: x.r.regionPass, utilization: x.r.result?.utilization ?? null,
+                            governing_check: x.r.result?.governing_check ?? null })),
+                        governing_member: first.indexOf(g0) + 1, ratio: g0.r.result?.utilization ?? null,
+                        pass: StcfsdPanel._combinePass(first.map((x) => x.r.regionPass)) };
+                    if (typeof lapRef.ratio === 'number') { Object.assign(lapRef, NOTICES.attachField({}, 'label', NOTICES.hostNotice('host.purlin.stiffness_share_reference', { ratio: lapRef.ratio }))); }
+                }
+                const missing = first.filter((_x, i) => fM[i] === null || (needV && fV[i] === null)).map((x) => x.m.sec.id);
+                if (missing.length) {
+                    lapUnknown = { ids: [...new Set(missing)], fM, fV };
+                } else {
+                    const sumM = (fM[0] as number) + (fM[1] as number);
+                    const sumV = needV ? (fV[0] as number) + (fV[1] as number) : null;
+                    const sM = fM.map((v) => (v as number) / sumM);
+                    const sV = needV ? fV.map((v) => (v as number) / (sumV as number)) : sM;
+                    const Vu = needV && pV ? pV.V : null;
+                    lapSum = { basis: 'sum_of_strengths', Mu, design_strengths: fM, design_strength_sum: sumM, flexure_ratio: Mu / sumM,
+                        Vu, shear_strengths: needV ? fV : null, shear_strength_sum: sumV, shear_ratio: Vu !== null && sumV ? Vu / sumV : null,
+                        shares_M: sM, shares_V: needV ? sV : null };
+                    Object.assign(lapSum, NOTICES.attachField({}, 'label', NOTICES.hostNotice('host.purlin.sum_of_strengths', { ratio: lapSum.flexure_ratio })));
+                    const same = first.every((x, i) => x.m.share === sM[i] && (x.m.shareV ?? x.m.share) === sV[i]);
+                    if (!same) { perMember = await runMembers(first.map((x, i) => ({ ...x.m, share: sM[i], shareV: sV[i] }))); }
+                }
+            }
+            if (lapUnknown) {
+                // 결정 S3′: 한 부재의 강도를 얻지 못함 → 강도의 합이 없다 — 평가하지 못함(첫 검토의 합격을 판정으로 쓰지 않는다)
+                const why = NOTICES.hostNotice('host.purlin.lap_strength_unknown', { sections: lapUnknown.ids.join(', ') });
+                const line = H('host.purlin.region_not_evaluated', { region: rg.labelNotice, why });
+                notEvaluated.push(line);
+                const firstRes = perMember.flatMap((x) => x.r.results);
+                if (firstRes.some((x) => x?.error)) {
+                    notEvaluated.push(H('host.purlin.region_error', { region: rg.labelNotice, errors: firstRes.filter((x) => x?.error).map((x) => x.error).join('; ') }));
+                }
+                const lu = lapUnknown;
+                out.push({
+                    ...StcfsdPanel._labelFields(rg.labelNotice),
+                    id: rg.id, kind: rg.kind, label: rg.label, span: r.span ?? null, support: r.support ?? null,
+                    side: r.side ?? null, start_ft: r.start_ft, end_ft: r.end_ft,
+                    Ly_in: lapStated ? 0 : null, Cb: lapStated ? 1.0 : null,
+                    Mu, Vu: pV ? pV.V : null, members: 2, R_uplift: rg.R ?? null,
+                    combo: rg.env?.combo ?? null, beta_dist: null, i621_region_eligible: r.i621_region_eligible,
+                    section_id: null, ...StcfsdPanel._spanKeysOf(r, multi),
+                    lap_members: perMember.map((x, i) => ({ section_id: x.m.sec.id, span: x.m.span, ...(x.m.role ? { role: x.m.role } : {}), share: null, share_V: null,
+                        share_stiffness: x.m.stiff ?? null, pass: null, utilization: null, design_strength: lu.fM[i], shear_strength: lu.fV[i] })),
+                    strength_basis: 'sum_of_strengths', ...(lapRef ? { reference_stiffness_share: lapRef } : {}),
+                    not_evaluated_reason: NOTICES.render(why, { lang: 'en' }), ...NOTICES.attachField({}, 'not_evaluated_reason', why),
+                    result: { pass: null, utilization: null, not_evaluated: [line], checks: [], design_checks: [] },
+                });
+                continue;
+            }
+            const gov = govOf(perMember);
             const allResults = perMember.flatMap((x) => x.r.results);
             // 검증 2026-11-28 의 1: 단면이 바뀌는 지점의 §G5 · §H3 — 단면마다 그 지점 검토(지배 부재가 아닌 부재의 것도)
             for (const ss of supportSections) {
@@ -6255,19 +6323,16 @@ export class StcfsdPanel implements McpPanelInterface {
                 const engM = (x: { m: Member }) => (Array.isArray(rg.src?.lap_members) ? rg.src.lap_members.find((mm: any) => mm && mm.span === x.m.span) : null);
                 const line = (x: { m: Member; r: any }) => ({ section_id: x.m.sec.id, span: x.m.span, ...(x.m.role ? { role: x.m.role } : {}), share: x.m.share,
                     pass: x.r.regionPass, utilization: x.r.result?.utilization ?? null, governing_check: x.r.result?.governing_check ?? null,
-                    check_point: x.r.result?.check_point ?? null, Mu: Mu * x.m.share, Vu: pV ? pV.V * x.m.share : null,
+                    check_point: x.r.result?.check_point ?? null, Mu: Mu * x.m.share, Vu: pV ? pV.V * (x.m.shareV ?? x.m.share) : null,
                     design_strength: StcfsdPanel._flexureStrength(x.r.results.find((y: any) => y.check_point === 'M_max')),
                     // 랩 접합 도구(utils.lapTwoMembers)가 그 부재의 단면 강도 · Ix 를 여기서(Ixx = 하중 해석이 몫에 쓴 값)
                     ...(mem.rule === 'lap' ? { Ixx: engM(x)?.Ixx ?? null, ...(x.r.result?.lap_section ? { lap_section: x.r.result.lap_section } : {}) } : {}) });
                 if (mem.rule === 'lap') {
-                    const ls = perMember.map(line);
-                    // 참고만: 설계 매뉴얼의 가정 (c) — 두 부재 강도의 합(M / (Ma1 + Ma2)) — 판정이 아니다
-                    const ma = ls.map((x) => x.design_strength);
-                    const sum = ma.every((v) => typeof v === 'number' && v > 0) ? (ma as number[]).reduce((p, q) => p + q, 0) : null;
-                    const ref: any = { basis: 'sum_of_strengths', Mu, design_strengths: ma, design_strength_sum: sum, ratio: sum ? Mu / sum : null };
-                    if (ref.ratio !== null) { Object.assign(ref, NOTICES.attachField({}, 'label', NOTICES.hostNotice('host.purlin.sum_of_strengths_reference', { ratio: ref.ratio }))); }
-                    return { lap_members: ls, governing_member: ls.indexOf(ls.find((x) => x.section_id === gov.m.sec.id && x.share === gov.m.share)!) + 1,
-                        share_basis: rg.src?.share_basis ?? 'stiffness_Ix', reference_sum_of_strengths: ref };
+                    // 결정 S3′: 부재마다 — 강도의 몫(share = M, share_V = V), 강성의 몫(참고), 그 부재의 휨 · 전단 설계강도, 강도의 몫으로 본 판정
+                    const ls = perMember.map((x, i) => ({ ...line(x), share_V: x.m.shareV ?? x.m.share, share_stiffness: x.m.stiff ?? null,
+                        shear_strength: lapSum?.shear_strengths ? lapSum.shear_strengths[i] : StcfsdPanel._shearStrength(x.r.results) }));
+                    return { lap_members: ls, governing_member: perMember.indexOf(gov) + 1, strength_basis: 'sum_of_strengths',
+                        sum_of_strengths: lapSum, ...(lapRef ? { reference_stiffness_share: lapRef } : {}) };
                 }
                 if (mem.rule === 'crosses_section_change') {
                     sectionRuleRegions.push({ rg, ids: perMember.map((x) => x.m.sec.id) });
@@ -6307,7 +6372,7 @@ export class StcfsdPanel implements McpPanelInterface {
             notEvaluated.push(H('host.purlin.region_note', { regions: NOTICES.group(regs.map((rg) => rg.labelNotice), ' · '), item: eng || { code: null, kind: 'not_evaluated', text: item, text_ko: item } }));
         }
         if (regions.some((rg) => rg.lap)) {
-            assumptions.push(H(multi ? 'host.purlin.lap_two_members_stiffness' : 'host.purlin.lap_two_members'));
+            assumptions.push(H(multi ? 'host.purlin.lap_two_members_sum' : 'host.purlin.lap_two_members'));
             if (lapStated) {
                 assumptions.push(H('host.purlin.lap_stated'));
             } else {
@@ -6431,6 +6496,18 @@ export class StcfsdPanel implements McpPanelInterface {
         return out;
     }
 
+    /** 결정 S3′: 전단 설계강도(φVn 또는 Vn/Ω — 반올림 전, 엔진 결과의 shear) — M_max 지점의 결과부터, 없으면 null */
+    private static _shearStrength(results: any[]): number | null {
+        const list = Array.isArray(results) ? [results.find((y: any) => y?.check_point === 'M_max'), ...results] : [];
+        for (const res of list) {
+            if (!res || typeof res !== 'object' || res.error || !res.shear || typeof res.shear !== 'object') { continue; }
+            const u = res.shear.display_unrounded && typeof res.shear.display_unrounded === 'object' ? res.shear.display_unrounded : {};
+            const v = Number.isFinite(u.design_strength) ? u.design_strength : res.shear.design_strength;
+            if (typeof v === 'number' && Number.isFinite(v) && v > 0) { return v; }
+        }
+        return null;
+    }
+
     /** 휨 강도(설계강도 φMn 또는 Mn/Ω — 반올림 전) — 결과에 없으면 null */
     private static _flexureStrength(res: any): number | null {
         if (!res || typeof res !== 'object' || res.error) { return null; }
@@ -6450,17 +6527,17 @@ export class StcfsdPanel implements McpPanelInterface {
         };
         const dsmVals = (d: any) => (d && typeof d === 'object' ? Object.fromEntries(Object.entries(d).filter(([k, v]) =>
             v === null || typeof v !== 'object' || ['warnings', 'assumptions'].includes(k))) : null);
-        const groups = [...c.pos.values()];
-        const deck = (Array.isArray(ap?.deck_by_span) ? ap.deck_by_span : []).filter((d: any) => d && c.spans.includes(d.span))
-            .map((d: any) => ({ span: d.span, kphi: d.kphi ?? null, kx: d.kx ?? null }));
+        const g = c.pos.values().next().value;
+        // 결정 S7′: 정모멘트 좌굴값 · 곡선은 엔진이 한 번 정한 데크 강성으로(deck_used — 그 값을 준 단면 section_id), 그 단면 자신의 값은 참고(deck_own)
+        const basis = ap?.deck_basis && typeof ap.deck_basis === 'object' ? ap.deck_basis : null;
+        const own = (Array.isArray(basis?.by_section) ? basis.by_section : []).find((d: any) => d && d.section_id === c.id);
         return {
             id: c.id, name: c.name ?? null, template: c.template ?? null, params: c.params ?? null, source: c.source, spans: [...c.spans],
             props: c.props, geometry: c.geom?.section ?? null,
-            dsm_pos: dsmVals(groups[0]?.dsm), dsm_neg: dsmVals(c.dsmNeg),
-            ...(groups.length > 1 ? { dsm_pos_by_deck: groups.map((g) => ({ spans: [...g.spans], kphi: g.kphi, kx: g.kx, dsm: dsmVals(g.dsm) })) } : {}),
-            deck,
-            curves: { pos: curve(groups[0]?.sig), neg: curve(c.negSig),
-                ...(groups.length > 1 ? { pos_by_deck: groups.map((g) => ({ spans: [...g.spans], ...curve(g.sig) })) } : {}) },
+            dsm_pos: dsmVals(g?.dsm), dsm_neg: dsmVals(c.dsmNeg),
+            deck_used: { kphi: g?.kphi ?? null, kx: g?.kx ?? null, section_id: basis?.section_id ?? null },
+            deck_own: own ? { kphi: own.kphi ?? null, kx: own.kx ?? null } : null,
+            curves: { pos: curve(g?.sig), neg: curve(c.negSig) },
         };
     }
 

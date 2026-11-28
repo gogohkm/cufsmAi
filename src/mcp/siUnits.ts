@@ -394,6 +394,8 @@ const NONE_KEYS = [
     'curve_length', 'lengths_analyzed', 'm_terms_max', 'n_minima_found',
     // 2026-11-28 결정 S1 – S4: 경간마다 단면 — 경간 · 지점 번호, 강성의 몫, 지배 부재의 차례
     'member_share', 'governing_member', 'share', 'shares', 'share_by_stiffness', 'lap_support', 'continuous_member_span', 'ending_member_span',
+    // 결정 S3′: 강성의 몫(참고) · V 의 강도 몫 — 무차원
+    'stiffness_share', 'stiffness_shares', 'member_share_V',
     'crosses_support', 'source_index', 'i621_check_span', 'uplift_R_by_span', 'R_own_span',
 ];
 
@@ -653,14 +655,18 @@ const PURLIN_REGION_RESULT: Table = {
 };
 /** 퍼린 구간: 위치는 ft(하중 해석 좌표), Ly 는 in, Mu · Vu 는 설계 입력(kip-in · kips). */
 /** 결정 S3: 랩의 두 부재 · 단면이 바뀌는 구간의 단면마다 한 줄 — 그 부재의 몫의 M · V(kip-in · kips), 휨 설계강도(kip-in) */
-const PURLIN_MEMBER_LINE: Table = { span: 'none', share: 'none', utilization: 'none', Mu: 'moment', Vu: 'force', design_strength: 'moment', Ixx: 'inertia',
-    depth: 'length', thickness: 'length' };
+/** 결정 S3′: 랩의 부재 줄 — 강도의 몫(share = M, share_V = V), 강성의 몫(참고), 휨 · 전단 설계강도(kip-in · kips) */
+const PURLIN_MEMBER_LINE: Table = { span: 'none', share: 'none', share_V: 'none', share_stiffness: 'none', utilization: 'none', Mu: 'moment', Vu: 'force',
+    design_strength: 'moment', shear_strength: 'force', Ixx: 'inertia', depth: 'length', thickness: 'length' };
 const PURLIN_REGION: Table = {
     ...SI_OUT_MEMBER,
     start_ft: 'length_ft', end_ft: 'length_ft', x_M_max_ft: 'length_ft', Ly_in: 'length',
     span: 'none', support: 'none', Mu: 'moment', Vu: 'force', members: 'none',
     lap_members: PURLIN_MEMBER_LINE, sections_checked: PURLIN_MEMBER_LINE,
-    reference_sum_of_strengths: { Mu: 'moment', design_strengths: 'moment', design_strength_sum: 'moment', ratio: 'none', label_params: { '*': 'none' } },
+    // 결정 S3′: 랩의 강도의 합(판정)과 강성의 몫으로 본 값(참고)
+    sum_of_strengths: { Mu: 'moment', design_strengths: 'moment', design_strength_sum: 'moment', flexure_ratio: 'none', Vu: 'force',
+        shear_strengths: 'force', shear_strength_sum: 'force', shear_ratio: 'none', shares_M: 'none', shares_V: 'none', label_params: { '*': 'none' } },
+    reference_stiffness_share: { shares: 'none', ratio: 'none', governing_member: 'none', members: { share: 'none', utilization: 'none' }, label_params: { '*': 'none' } },
     result: PURLIN_REGION_RESULT,
 };
 const PURLIN_GOVERNING: Table = { ...PURLIN_REGION_RESULT, region: PURLIN_REGION };
@@ -682,8 +688,8 @@ export const SI_OUT_PURLIN: Table = {
         geometry: { qlip: 'none', top_width: 'length', hat_depth: 'length', brim: 'length', diameter: 'length', depth: 'length', flange_width: 'length',
             thickness: 'length', lip_depth: 'length', R_corner: 'length' },
         dsm_pos: SI_OUT_DSM_M, dsm_neg: SI_OUT_DSM_M,
-        dsm_pos_by_deck: { dsm: SI_OUT_DSM_M, spans: 'none', kphi: 'rot_stiff', kx: 'lat_stiff' },
-        deck: { span: 'none', kphi: 'rot_stiff', kx: 'lat_stiff' },
+        // 결정 S7′: 정모멘트 곡선에 쓴 데크 강성(모든 단면에 한 값)과 그 단면 자신의 값(참고)
+        deck_used: { kphi: 'rot_stiff', kx: 'lat_stiff' }, deck_own: { kphi: 'rot_stiff', kx: 'lat_stiff' },
         curves: { '*': { lengths: 'length', load_factors: 'none', fy_reference: 'stress', spans: 'none' } },
         spans: 'none',
     },

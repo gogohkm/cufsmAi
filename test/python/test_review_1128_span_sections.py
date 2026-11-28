@@ -11,8 +11,10 @@
   D + Lr: 내민 −0.06, 끝 경간 +M 5.11, 랩 끝 4.65, 지점 8.75, 안 경간 랩 끝 3.89, +M 2.23, 랩 끝 3.73, 가운데 4.95 kip-ft;
   V 1.09 · 1.50 · 1.78 · 1.59 · 1.18 · 1.17 · 1.29 kips; P 1.21 · 3.37 · 2.58 kips; 0.6D + 0.6W: −4.13 · −1.81 kip-ft; R = 0.70 (Z).
   예제의 값은 반올림한 비계수 값(그림 2)을 조합한 것이라 |계산 − 매뉴얼| ≤ 0.01 + 0.5 % 로 본다.
-- 두 예제의 랩 구간 강도는 가정 (c) 「겹친 부재 강도의 합」(II-1A: φMnℓ = 0.90(11.3 + 8.66)) — 엔진의 강성 몫(결정 S3)은
-  설계 가정이며 그 합은 참고값(reference_basis)으로 싣는다.
+- 두 예제의 랩 구간 강도는 가정 (c) 「겹친 부재 강도의 합」(II-1A: φMnℓ = 0.90(11.3 + 8.66) = 18.0 kip-ft) — 결정 S3′
+  (2026-11-28 오후)부터 엔진도 그 합으로 판정(strength_basis), 강성 몫은 참고값(reference_basis = stiffness_share).
+- 데크 강성은 설계 매뉴얼 II-1C 처럼 한 번(결정 S7′ — 쓰이는 단면 가운데 kφ 가 가장 작은 단면): x070 0.1417 · x059 0.1126
+  kip-in/rad/in → 모든 경간에 0.1126.
 """
 
 import hashlib
@@ -37,9 +39,9 @@ BASELINE = os.path.join(HERE, 'span_sections_1128_baseline.json')
 # span_sections 를 주면 더해지는 키(옛 키 · 값은 그대로) — 같은 단면 시험에서 이 키를 빼고 견준다
 REGION_NEW_KEYS = {'span', 'spans', 'crosses_support', 'lap_portions', 'lap_support', 'lap_side', 'lap_end_ft',
                    'continuous_member_span', 'ending_member_span', 'lap_members', 'Ixx_members',
-                   'share_by_stiffness', 'share_basis', 'reference_basis', 'same_section', 'depth_mismatch',
+                   'share_by_stiffness', 'strength_basis', 'reference_basis', 'same_section', 'depth_mismatch',
                    'lap_evaluable', 'not_evaluable_reason', 'uplift_R'}
-AUTO_NEW_KEYS = {'deck_by_span', 'i621_by_span', 'uplift_R_by_span', 'span_map', 'i621_check_span'}
+AUTO_NEW_KEYS = {'deck_basis', 'i621_by_span', 'uplift_R_by_span', 'span_map', 'i621_check_span'}
 
 
 def _sha(obj):
@@ -107,7 +109,10 @@ def test_same_section_every_span_equals_single_section():
         per = analyze_loads(**kw, span_sections=[dict(sec, id='S1') for _ in range(n)])
         assert C.canon(_strip(per)) == C.canon(one), name
         ap = per['auto_params']
-        assert all(d['kphi'] == ap['deck']['kphi'] and d['kx'] == ap['deck']['kx'] for d in ap['deck_by_span']), name
+        db = ap['deck_basis']                       # 결정 S7′: 단면 하나 — 그 단면의 데크 값 그대로
+        assert db['section_id'] == 'S1' and [r['section_id'] for r in db['by_section']] == ['S1'], name
+        assert db['by_section'][0]['spans'] == list(range(n)) and db['by_section'][0]['adopted'] is True, name
+        assert (db['by_section'][0]['kphi'], db['by_section'][0]['kx']) == (ap['deck']['kphi'], ap['deck']['kx']), name
         assert ap['uplift_R_by_span'] is not None and 'span_map' in ap, name
         if 'i621_by_span' in ap:
             assert all(b['R'] == ap['uplift_R'] for b in ap['i621_by_span'] if b['real_span']), name
@@ -135,13 +140,21 @@ def test_two_sections_per_span_stiffness_deck_and_regions():
     assert r['gravity']['M_envelope_min'] == ref['gravity']['M_envelope_min']
     assert r['uplift']['M_envelope_max'] == ref['uplift']['M_envelope_max']
     assert r['deflection']['I_span_in4'] == [12.2, 10.3, 10.3, 12.2]
-    # 데크 kφ 는 경간마다 그 단면의 t (Gao & Moen, Example II-1C 3b) — 두 값이 다르고 각각 식과 같다
-    k = [calc_rotational_stiffness(t_panel=0.019, t_purlin=t, fastener_spacing=12, flange_width=2.5, E=29500.0)
-         for t in (0.070, 0.059, 0.059, 0.070)]
-    assert [round(d['kphi'], 4) for d in ap['deck_by_span']] == [round(x, 4) for x in k]
-    assert ap['deck_by_span'][0]['kphi'] > ap['deck_by_span'][1]['kphi']
-    d0 = _calc_deck_info(dict(C.DECK_TF), dict(C.SEC_C070))                      # 옛 키 = 첫 경간의 단면
-    assert (ap['deck']['kphi'], ap['deck']['kx']) == (d0['kphi'], d0['kx']) ==         (ap['deck_by_span'][0]['kphi'], ap['deck_by_span'][0]['kx'])
+    # 결정 S7′: 데크 강성은 한 번 — 쓰이는 단면 가운데 kφ 가 가장 작은 단면(두께만 다르면 얇은 쪽, Design Manual II-1C 의
+    # 「안전측의 근사」). 단면마다의 kφ 는 식(Gao & Moen, Example II-1C 3b) 그대로 참고로: x070 0.1417, x059 0.1126 kip-in/rad/in
+    k = {t: calc_rotational_stiffness(t_panel=0.019, t_purlin=t, fastener_spacing=12, flange_width=2.5, E=29500.0)
+         for t in (0.070, 0.059)}
+    db = ap['deck_basis']
+    assert db['rule'] == 'once_smallest_kphi' and db['section_id'] == 'S2'
+    assert [(r['section_id'], r['spans'], r['adopted']) for r in db['by_section']] == [('S1', [0, 3], False),
+                                                                                       ('S2', [1, 2], True)]
+    assert [r['kphi'] for r in db['by_section']] == [round(k[0.070], 4), round(k[0.059], 4)] == [0.1417, 0.1126]
+    d2 = _calc_deck_info(dict(C.DECK_TF), dict(C.SEC_C059, id='S2'))             # 모든 데크 값이 그 한 단면에서
+    keys = ('kphi', 'kx', 'kphi_method', 'kx_method', 'display_unrounded', 'type')
+    assert {k: ap['deck'][k] for k in keys} == {k: d2[k] for k in keys} and ap['deck']['kphi'] == 0.1126
+    assert 'deck_by_span' not in ap
+    assert ap['positive_region']['kphi'] == 0.1126
+    assert 'loads.assumption.deck_once_smallest_kphi' in _codes(r, 'assumptions')
     # §I6.2.1 — 두 단면 모두 조건을 만족: C 연속보 R = 0.60 (Example II-1A)
     assert ap['uplift_R_by_span'] == [0.6, 0.6, 0.6, 0.6] and ap['uplift_R'] == 0.6
     # 모든 구간에 경간
@@ -164,13 +177,15 @@ def test_two_sections_per_span_stiffness_deck_and_regions():
             roles = [m['role'] for m in g['lap_members']]
             assert roles == (['continuous', 'ends_at_lap_end'] if g['lap_side'] == 'left'
                              else ['ends_at_lap_end', 'continuous'])
-            assert g['reference_basis'] == 'sum_of_strengths' and g['lap_evaluable'] is True
+            assert [m['stiffness_share'] for m in g['lap_members']] == g['share_by_stiffness']
+            assert g['strength_basis'] == 'sum_of_strengths' and g['reference_basis'] == 'stiffness_share'
+            assert g['lap_evaluable'] is True and 'share_basis' not in g
         else:
             assert g['spans'] and g['span'] in g['spans'], (lst, g)
     # 중력 랩 구간 6개(지점마다 왼쪽 · 오른쪽), 지점 2 의 몫 = 12.2 / 22.5
     laps = ap['lap_regions']
     assert len(laps) == 6 and laps[0]['share_by_stiffness'][0] == 12.2 / 22.5
-    assert 'loads.assumption.lap_stiffness_share' in _codes(r, 'assumptions')
+    assert 'loads.assumption.lap_sum_of_strengths' in _codes(r, 'assumptions')
     assert 'loads.assumption.span_sections_per_span' in _codes(r, 'assumptions')
 
 
@@ -249,17 +264,30 @@ def test_lap_connection_two_thicknesses_thinner_governs():
     assert mg['fastener_orientation'] == {'t1_head_side': 0.070, 't2_far_side': 0.059}
     # 팔: min(9 − 0.070, 9 − 0.059) = 8.930 (부재 1)
     assert mg['lever_arm'] == 1 and abs(two['V_transfer'] - 144.0 / 8.930) < 1e-12
-    # 랩 휨: Mn,lap = min(Mnℓ,i / s_i), s = I_i / ΣI (결정 S3); 참고 = 강도의 합 (매뉴얼 가정 (c))
+    # 랩 휨(결정 S3′): Mn,lap = Mnℓ,1 + Mnℓ,2 — 두 부재 강도의 합(매뉴얼 가정 (c)); 참고 = 강성 몫 min(Mnℓ,i / s_i), s = I_i / ΣI
     s1, s2 = 12.2 / 22.5, 10.3 / 22.5
-    mn = min(2.47 * 55.0 / s1, 1.89 * 55.0 / s2)
-    assert abs(two['display_unrounded']['Mn_lap'] - mn) < 1e-9 and mg['flexure_local'] == 2
-    assert two['share_by_stiffness'] == [s1, s2]
-    ref = two['flexure_reference_sum_of_strengths']
-    assert abs(ref['Mn_lap'] - (2.47 + 1.89) * 55.0) < 1e-9
+    assert abs(two['display_unrounded']['Mn_lap'] - (2.47 + 1.89) * 55.0) < 1e-9 and mg['flexure_local'] == 'sum'
+    assert abs(two['flexure_dcr'] - round(144.0 / (0.9 * (2.47 + 1.89) * 55.0), 4)) < 1e-12
+    assert two['share_by_stiffness'] == [s1, s2] and [m['stiffness_share'] for m in two['lap_members']] == [s1, s2]
+    assert two['strength_basis'] == 'sum_of_strengths' and two['reference_basis'] == 'stiffness_share'
+    assert 'share_basis' not in two and 'flexure_reference_sum_of_strengths' not in two
+    ref = two['flexure_reference_stiffness_share']
+    assert abs(ref['Mn_lap'] - min(2.47 * 55.0 / s1, 1.89 * 55.0 / s2)) < 1e-9 and ref['governing_member'] == 2
+    assert abs(ref['dcr'] - 144.0 / (0.9 * ref['Mn_lap'])) < 1e-12 and ref['dcr'] > 144.0 / (0.9 * (2.47 + 1.89) * 55.0)
+    assert [m['Mnl'] for m in two['lap_members']] == [2.47 * 55.0, 1.89 * 55.0]
+    # 설계 매뉴얼 II-1A(첫 내부 지점의 랩): φMnℓ = 0.90 (11.3 + 8.66) = 18.0 kip-ft, Mu 12.0 kip-ft → 0.667
+    assert _close(two['phi_Mn_lap'] / 12.0, 18.0) and abs(two['flexure_dcr'] - 0.667) < 0.001
     assert mg['flexure_distortional'] is None       # lap_restrained — 뒤틀림 해당 없음
     assert 'lap.assumption.two_members' in _codes(two, 'assumptions')
     loc = next(c for c in two['design_checks'] if c['id'] == 'lap.flexure.local')
-    assert loc['governing_member'] == 2 and loc['reference_sum_of_strengths']['ratio'] == ref['dcr']
+    assert loc['strength_basis'] == 'sum_of_strengths' and 'governing_member' not in loc
+    assert loc['reference_stiffness_share']['ratio'] == ref['dcr'] and loc['reference_stiffness_share']['governing_member'] == 2
+    # H2 도 합한 강도로: Va = φ(Vn,1 + Vn,2), Ma = φ(Mnℓ,1 + Mnℓ,2)
+    h2 = next(c for c in two['design_checks'] if c['id'] == 'lap.bending_shear')
+    vn = [m['Vn'] for m in two['lap_members']]
+    want = ((144.0 / (0.9 * (2.47 + 1.89) * 55.0)) ** 2 + (2.5 / (0.95 * (vn[0] + vn[1]))) ** 2) ** 0.5
+    assert abs(h2['ratio'] - want) < 1e-12 and h2['strength_basis'] == 'sum_of_strengths', (h2['ratio'], want)
+    assert h2['reference_stiffness_share']['ratio'] >= h2['ratio'] - 1e-12
 
 
 def test_lap_connection_same_second_member_equals_single():

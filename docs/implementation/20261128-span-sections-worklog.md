@@ -32,6 +32,15 @@
 | S9 | 구멍 · 보강재 | 지금의 입력이 모든 단면에 같이 적용된다(구간의 검토에 그 구간 단면의 모델을 싣는다). §H4 는 퍼린 사슬에 없다(그대로) | 단면마다 다른 구멍은 이번 범위 밖 |
 | S10 | 맞대 볼 것 | 설계 매뉴얼 II-1A · II-2A(경간마다 부재가 다른 예제)의 소요 강도 · 구간 검토 | 엔진의 `I_span_in4` 가 그 예제의 가정을 따르려고 들어간 것이다 |
 
+**2026-11-28 오후 — S3 · S7 을 설계 매뉴얼의 방식으로 바꿈.** 보고에 「매뉴얼의 가정과 다른 두 곳」 을 적었고 사용자가 「메뉴얼 방식으로 변경해줘」 라고 했다. 위 표의 S3 · S7 은 아래로 바뀐다(6절에 단계와 기록).
+
+| # | 무엇 | 바꾼 값 | 까닭 |
+|---|---|---|---|
+| S3′ | 랩에서 두 부재의 강도 | **두 부재 강도의 합**(설계 매뉴얼 II-1A · II-2A 의 가정 (c)) — 휨 Mu ≤ Σ φMn,i, 전단 Vu ≤ Σ φVn,i, 휨 + 전단(§H2)도 합한 강도로. 구현은 「각 부재가 제 강도의 비만큼 받는다」(M 은 휨 설계 강도의 비, V 는 전단 설계 강도의 비로 나눠 부재마다 엔진이 검토 — 판정비가 강도의 합으로 본 값과 같다). 두 단면이 같으면 몫이 0.5 라 결과가 그대로다. 강성(Ix)비로 나눈 값은 참고로 낸다(판정에 쓰지 않음) | 사용자의 결정. 매뉴얼의 예제와 같은 값이 나온다 |
+| S7′ | 데크 강성 | **한 번 계산해 모든 경간에** — 쓰이는 단면 가운데 kφ 가 가장 작게 나오는 단면의 값(두께만 다르면 얇은 쪽 — 설계 매뉴얼 II-1C 의 「안전측의 근사」). 어느 단면의 값인지 결과에 적고, 단면마다의 값은 참고로. §I6.2.1 의 조건과 양압의 R 은 앞과 같이 경간마다 그 단면으로 | 사용자의 결정 |
+
+랩 패스너(S5) · 춤이 다른 랩(S4) · 랩의 Ix = 두 Ix 의 합(가정 (b))은 그대로다.
+
 ---
 
 ## 3. 단계표
@@ -161,3 +170,32 @@
 - 답의 크기: 4 경간 · 3 단면의 요약 40,511 B(예산 40 KiB = 40,960 B 바로 아래 — 넘으면 줄이는 단계가 돈다), `get_case_inputs` 는 단면 19 개에서 13.5 KB(12 KB 를 넘는다 — 목록은 20 개까지).
 - 데스크톱의 단면 목록 Ix 는 호스트가 마지막으로 알린 값 — 고친 직후 잠깐 앞의 값일 수 있다. `host.purlin.i621_r_some_spans` 는 데스크톱 시험이 직접 띄우지 않는다(날 code 가 없다는 것만).
 - 엔진이 바뀌었다(`11e0fb2`) — 저장된 결과는 「다른 엔진」 으로 버려지고 [다시 계산] 으로 돌아온다.
+
+---
+
+## 6. 설계 매뉴얼의 방식으로(S3′ · S7′ — 2026-11-28 오후)
+
+기준점: `f2b4f5d`. 5절의 「사용자가 볼 것」 둘은 이 절로 풀린다.
+
+| 단계 | 내용 | 닿는 곳 | 상태 |
+|---|---|---|---|
+| EH2 | 엔진 — 데크 강성을 한 번(가장 작은 kφ 의 단면), 랩 접합 도구의 휨을 강도의 합으로. 호스트 — 랩 구간의 판정을 강도의 합(강도비의 몫)으로, 강성비의 값은 참고, 데크 강성 하나, 읽는 곳 · MCP · 알림 · 시험 | `python/**`, `src/**`, `webview/**`, `test/**` | 끝(커밋 전 — 아래 기록) |
+| D2 | 데스크톱 — 랩의 줄(강도의 합 · 부재의 강도와 몫 · 강성비 참고), 데크 강성 하나, 시험 | `desktop/**` | EH2 뒤 |
+| V2 | 독립 확인 — 바뀐 두 규칙만(매뉴얼의 수와 맞대기, 합격이 아닌 것이 합격이 되지 않는지) | 읽기만 | EH2 뒤 |
+| M2 | 마일스톤 — 전체 한 번, 설치 파일 · 포장본 | — | |
+
+### EH2 — 엔진 · 호스트(끝, 커밋 전)
+
+**랩 = 두 부재 강도의 합(S3′).** 호스트 퍼린 사슬: 랩 구간마다 먼저 강성의 몫(엔진 `lap_members[].stiffness_share`)으로 두 부재를 엔진에 검토시켜 부재마다의 휨 설계강도 φMn,i(M_max 지점 결과의 `design_strength` — 그 구간의 지배 휨강도)와 전단 설계강도 φVn,i(`shear.design_strength`)를 얻는다(강도는 소요에 달리지 않는다). 그다음 강도의 몫 M_i = M · φMn,i / Σ φMn, V_i = V · φVn,i / Σ φVn 로 다시 검토한 것이 판정 — 두 부재의 휨 비 = M / Σ φMn, 전단 비 = V / Σ φVn, §H2 는 엔진의 부재 검토 그대로(합한 강도와 같거나, 지배 휨강도가 §H2 의 Malo 가 아니면 큰 부재 비 — 조금 안전측). 두 몫이 첫 검토의 몫과 같으면(같은 두 부재 — 모두 정확히 0.5) 다시 부르지 않는다(본문 · 부르는 수 그대로). 한 부재의 강도를 얻지 못하면 그 랩은 평가하지 못함(`host.purlin.lap_strength_unknown`). 강성의 몫이 없으면(두 부재 Ix 를 모름) 첫 검토는 절반으로 강도만 얻고 참고값이 없다. 엔진의 랩 접합 도구도 같은 규칙: Mn,lap = Mnℓ,1 + Mnℓ,2, Mnd,lap = Mnd,1 + Mnd,2, §H2 의 Va = φ(Vn,1 + Vn,2) — 강성 몫의 값은 참고(`flexure_reference_stiffness_share`, 검토 항목의 `reference_stiffness_share`). 패스너 · 팔 · 블록전단 · 춤이 다른 랩은 그대로. 둘째 부재 입력이 없으면 바이트까지 그대로(기준 시험).
+
+**데크 강성 한 번(S7′).** `analyze_loads` 가 `span_sections` 를 받으면 쓰이는 단면마다 데크 값을 계산해 kφ 가 가장 작은 단면(같으면 kx 가 작은 쪽, 그다음 앞의 단면)의 결과 전부를 `auto_params.deck` 로 — 모든 경간에. `auto_params.deck_basis {rule: 'once_smallest_kphi', section_id, reference, by_section[{section_id, spans, kphi, kx, kphi_method, kx_method, adopted}]}`(단면마다는 참고). 단면이 다르고 데크가 있으면 가정 `loads.assumption.deck_once_smallest_kphi`. 호스트는 그 한 값으로 단면마다 정모멘트 곡선 하나. §I6.2.1 · 양압 R · Ix 는 경간마다 그대로.
+
+**맞대 본 값(II-1A, 둘째 지점 왼쪽 랩 — S1 x070 | S2 x059).** Mu 144.42 kip-in / (φMn 111.81 + 84.23 = 196.04) = **0.7367**; Vu 2.506 kips / (φVn 5.470 + 3.270 = 8.740 — 매뉴얼 0.95 (5.76 + 3.44) = 8.74) = 0.2868; 강도의 몫 M 0.5703 | 0.4297, V 0.6259 | 0.3741; 부재의 판정비(§H2 가 지배) 0.7906 | 0.7907 = √(0.7367² + 0.2868²). 참고(강성의 몫 0.5418 | 0.4582): 0.7426 | 0.8607. 랩 접합 도구(Se 2.47 / 1.89, Fy 55): φMn,lap = 0.9 (135.85 + 103.95) = 215.82 kip-in = 17.99 kip-ft(매뉴얼 18.0), Mu 12.0 kip-ft → 0.667(참고 — 강성 몫 227.08 kip-in, 0.705). 데크: kφ x070 0.1417 · x059 0.1126 kip-in/rad/in → 모든 경간 0.1126.
+
+**결과 키.** 하중 해석(경간별 단면일 때만): `auto_params.deck_by_span` 없앰 → `deck_basis`; 랩 구간 `lap_members[].share` → `stiffness_share`, `share_basis` 없앰 → `strength_basis: 'sum_of_strengths'`, `reference_basis` 값 `'sum_of_strengths'` → `'stiffness_share'`, `lap_evaluable` 은 춤만으로(강성 몫이 없어도 true), `span_map.laps[].shares` → `stiffness_shares`. 퍼린 결과의 랩 구간: `share_basis` · `reference_sum_of_strengths` 없앰 → `strength_basis`, `sum_of_strengths {basis, Mu, design_strengths, design_strength_sum, flexure_ratio, Vu, shear_strengths, shear_strength_sum, shear_ratio, shares_M, shares_V, label…}`, `reference_stiffness_share {basis: 'stiffness_Ix', shares, members[{section_id, share, pass, utilization, governing_check}], governing_member, ratio, pass, label…}`; `lap_members[]` 의 `share` = M 의 강도 몫(뜻이 바뀜), 더한 `share_V` · `share_stiffness` · `shear_strength`, `Vu` = V · share_V. 검토 지점 location 에 `member_share`(M 몫) · 다를 때만 `member_share_V`. 단면 블록: `deck[]` · `dsm_pos_by_deck` · `curves.pos_by_deck` 없앰 → `deck_used {kphi, kx, section_id}` · `deck_own {kphi, kx}`. 랩 접합 결과: `share_basis` · `flexure_reference_sum_of_strengths` 없앰 → `strength_basis` · `flexure_reference_stiffness_share {Mn_lap, phi_Mn_lap, dcr, governing_member, shares}`, `reference_basis: 'stiffness_share'`, `lap_members[].share` → `stiffness_share` + `Mnl` · `Vn`, `member_governing.flexure_local · flexure_distortional · bending_shear` = `'sum'`; 검토 항목 `lap.flexure.local` · `lap.bending_shear` 에 `strength_basis` · `reference_stiffness_share`(`governing_member` · `reference_sum_of_strengths` 없앰). MCP 요약: 랩 줄 `sum_of_strengths {flexure_ratio, shear_ratio}` · `reference_stiffness_share_ratio`(`reference_sum_of_strengths_ratio` 없앰) · 부재 `share_V`(다를 때), 단면 `deck_used` · `deck_own`, 하중 해석 요약 `deck_basis.by_section` 짧은 줄.
+
+**알림 · 점검.** 호스트: `lap_two_members_stiffness` → `lap_two_members_sum`, `lap_stiffness_share` → `lap_strength_share`, `sum_of_strengths_reference` → `stiffness_share_reference`(참고), 새 `sum_of_strengths`(판정 줄의 이름표) · `lap_strength_unknown`; `sections_per_span` · `host.lap.two_sections` · `members_from_list` 글. 엔진: `loads.assumption.lap_stiffness_share` → `lap_sum_of_strengths`, 새 `deck_once_smallest_kphi`, `lap.label.sum_of_strengths_reference` → `lap.label.stiffness_share_reference`, 없앰 `lap.note.share_from_ixx` · `share_same_members` · `lap.reason.lap_shares_need_ixx` · `loads.reason.lap_shares_need_ixx`; `lap.assumption.two_members` · `span_sections_per_span` · `lap_shares_need_ixx`(경고) 글. 점검: `val.load_analysis.deck_section.N` → `deck_once`(「데크 강성 — 한 번 (kφ 가 가장 작은 단면)」), `lap_members` 의 이름 「랩 — 두 부재 (강도의 합)」. 계산서의 랩 표(M 몫 · V 몫 · 휨 · 전단 설계강도, 강도의 합 줄 = 판정, 강성의 몫 줄 = 참고)와 규칙 문장. k3 목록 문서 다시 만듦.
+
+**정모멘트 좌굴값(II-1A).** S1(x070): 혼자(자신의 kφ 0.1417) Mcrl 141.40 · Mcrd 196.94 → 경간별 단면(0.1126) 141.32 · 191.52 kip-in. S2(x059)는 자신의 kφ 그대로 — Mcrl 84.90 · Mcrd 140.22.
+
+**시험(에이전트의 마지막 실행).** 파이썬 전체 598 통과(1128 시험의 기대값을 새 규칙 · 매뉴얼의 수로 고침 — 기준 파일은 그대로 통과). `test:quick` · `span_sections_contract`(P2: 같은 두 부재 몫 0.5 · 두 번째 검토 없음, P3: 0.7367 · 강성 참고 0.7426 | 0.8607 · 데크 0.1126, 새 P3c: 부재 강도가 없으면 평가하지 못함) · lap_* 셋 · mcp_* 넷 · notice_render · `build:mcp` + parity · `test:rendered` 15 + 11 + 3 · k3 목록 `--check` 통과. 고정값(k2 · k3)은 뒤집은 것 없음(한 단면 길은 그대로 — k2 · k3 전체 실행은 하지 않음).

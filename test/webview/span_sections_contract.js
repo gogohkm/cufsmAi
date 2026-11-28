@@ -8,7 +8,9 @@
 //  P1 모든 경간 S1(S2 를 정의만) → 엔진 본문 · 결과가 단면 목록이 없을 때와 같다
 //  P2 S2 = S1 의 치수 → 단면 하나의 결과와 같은 수(랩의 몫 0.5)
 //  P3 설계 매뉴얼 II-1A 의 두 단면(9CS2.5x070 끝 경간 · 9CS2.5x059 안 경간): span_sections 와 단면마다의 Ixx 가 엔진에, 구간마다 그 경간의 단면,
-//     정모멘트 구간의 강도 = 그 단면 하나로 푼 강도, 랩의 몫 · 두 부재의 줄 · 강도의 합(참고), 단면 블록(성질 · 좌굴값 · 곡선), 검증 · 보고서
+//     정모멘트 구간의 강도 = 그 단면 하나로 푼 강도, 랩 = 두 부재 강도의 합(결정 S3′ — 강도의 몫, 매뉴얼 0.7367) · 강성의 몫(참고),
+//     데크 강성 한 번(결정 S7′ — kφ 가 가장 작은 단면 0.1126), 단면 블록(성질 · 좌굴값 · 곡선), 검증 · 보고서
+//  P3c 부재의 강도를 얻지 못한 랩 → 평가하지 못함
 //  P4 춤이 다른 랩 → 평가하지 못함(엔진의 까닭), 지운 단면 → S1, 직접 고친 모델 → 막음
 //  P5 MCP 본문 = 화면 단추 본문, 파일 왕복, 랩 접합의 두 부재, SI 답 · 예산
 'use strict';
@@ -172,9 +174,11 @@ async function main() {
   const R = ctx.load(path.join('src', 'case', 'requests.ts'));
   const engine = [];
   const realCall = p._pythonBridge.call.bind(p._pythonBridge);
+  let tamper = null;   // 엔진 답을 고쳐 보는 시험(부재 강도가 없을 때)
   p._pythonBridge.call = (method, params) => {
     engine.push({ method, params: JSON.parse(JSON.stringify(params ?? null)) });
-    return realCall(method, params);
+    const pr = realCall(method, params);
+    return tamper ? pr.then((res) => tamper(method, params, res)) : pr;
   };
   const sent = (method) => engine.filter((e) => e.method === method);
   const strip = (r) => JSON.parse(JSON.stringify(r, (k, v) => (['timestamp', 'at', '_meta', 'case_rev', 'case_inputs_written', 'case_inputs_used', 'case_inputs_replaced'].includes(k) ? undefined : v)));
@@ -230,8 +234,14 @@ async function main() {
       assert.strictEqual(g.result.utilization, h.result.utilization, `${g.id} ratio`);
       assert.strictEqual(g.result.pass, h.result.pass, `${g.id} verdict`);
       assert.strictEqual(g.result.design_strength, h.result.design_strength, `${g.id} strength`);
-      if (g.lap_members) { assert.deepStrictEqual(g.lap_members.map((m) => m.share), [0.5, 0.5], `${g.id} shares 0.5`); }
+      if (g.lap_members) {
+        // 결정 S3′: 같은 두 부재 — 강도의 몫 · 강성의 몫 모두 정확히 0.5, 두 번째 검토 없음(본문 · 부르는 수가 앞과 같다)
+        assert.deepStrictEqual(g.lap_members.map((m) => [m.share, m.share_V, m.share_stiffness]), [[0.5, 0.5, 0.5], [0.5, 0.5, 0.5]], `${g.id} shares 0.5`);
+        assert.strictEqual(same.designs.filter((d) => d.check_location && d.check_location.region === g.id && d.check_location.check_point === 'M_max').length,
+          new Set(g.lap_members.map((m) => m.section_id)).size, `${g.id}: one call per member section, no second pass`);
+      }
     });
+    assert(!same.designs.some((d) => d.check_location && 'member_share_V' in d.check_location), 'equal members: no V share of its own in the bodies');
     assert.strictEqual(same.res.pass, one.res.pass); assert.strictEqual(same.res.utilization, one.res.utilization);
     notes.push(`P2: S2 = S1 dimensions → ${same.res.regions.length} regions with the same ratio / verdict / strength, lap shares 0.5 (max ratio ${one.res.utilization})`);
 
@@ -244,7 +254,17 @@ async function main() {
     assert(Math.abs(blk.S1.props.Ixx - 12.2) < 0.1 && Math.abs(blk.S2.props.Ixx - 10.3) < 0.1, 'II-1A Ix ' + [blk.S1.props.Ixx, blk.S2.props.Ixx]);
     assert(ss[1].thickness === 0.059 && ss[0].thickness === 0.07 && !('I_span_in4' in two.loads), 'section dims in the engine body; no I_span_in4 typed');
     assert.deepStrictEqual(two.res.span_sections, ['S1', 'S2', 'S2', 'S1']);
-    assert(blk.S2.deck[0].kphi < blk.S1.deck[0].kphi, 'deck kphi per section');
+    // 결정 S7′: 데크 강성은 한 번 — kφ 가 가장 작은 단면(x059, 0.1126 kip-in/rad/in; x070 자신은 0.1417 — 참고)을 모든 단면 · 경간에
+    assert(blk.S1.deck_used.kphi === blk.S2.deck_used.kphi && blk.S1.deck_used.section_id === 'S2' && blk.S2.deck_used.kphi === blk.S2.deck_own.kphi
+      && Math.abs(blk.S2.deck_own.kphi - 0.1126) < 2e-4 && Math.abs(blk.S1.deck_own.kphi - 0.1417) < 2e-4, 'deck once (smallest kphi) ' + JSON.stringify([blk.S1.deck_used, blk.S1.deck_own, blk.S2.deck_own]));
+    assert(!('dsm_pos_by_deck' in blk.S1) && !('pos_by_deck' in blk.S1.curves) && !('deck' in blk.S1), 'no per-deck variants');
+    const apII = two.res.load_analysis.auto_params;
+    assert(apII.deck.kphi === blk.S1.deck_used.kphi && apII.deck_basis.section_id === 'S2' && !('deck_by_span' in apII), 'engine deck_basis');
+    // S1(x070)의 정모멘트 좌굴값: 혼자일 때(P1 — 그 자신의 kφ 0.1417)와 경간별 단면(kφ 0.1126 — 한 번 정한 값). 데크 스프링이 약해 같거나 작다
+    const s1Own = one.res.dsm_positive, s1Per = blk.S1.dsm_pos;
+    assert(s1Per.Mxxcrd <= s1Own.Mxxcrd + 1e-9 && s1Per.Mxxcrl > 0, 'S1 +M with the smaller deck stiffness ' + JSON.stringify([s1Own.Mxxcrl, s1Own.Mxxcrd, s1Per.Mxxcrl, s1Per.Mxxcrd]));
+    notes.push(`P3 deck: kφ ${blk.S1.deck_own.kphi} (S1 own) · ${blk.S2.deck_own.kphi} (S2) → ${blk.S1.deck_used.kphi} every span; S1 +M Mcrl ${s1Own.Mxxcrl.toFixed(2)} → ${s1Per.Mxxcrl.toFixed(2)}, `
+      + `Mcrd ${s1Own.Mxxcrd.toFixed(2)} → ${s1Per.Mxxcrd.toFixed(2)} kip-in; S2 +M Mcrl ${blk.S2.dsm_pos.Mxxcrl.toFixed(2)} · Mcrd ${blk.S2.dsm_pos.Mxxcrd.toFixed(2)} (its own kφ — unchanged)`);
     assert(blk.S1.curves.pos.lengths.length > 20 && blk.S2.curves.neg.load_factors.length === blk.S2.curves.neg.lengths.length, 'signature curves per section');
     assert(blk.S2.dsm_pos.Mxxcrl > 0 && blk.S2.dsm_neg.Mxxcrd > 0, 'buckling values per section');
     for (const g of two.res.regions) {
@@ -259,17 +279,32 @@ async function main() {
     const lap1 = two.res.regions.find((g) => g.kind === 'lap' && g.support === 1 && g.side === 'left');
     const m1 = lap1.lap_members;
     const I1 = blk.S1.props.Ixx, I2 = blk.S2.props.Ixx;
-    assert(Math.abs(m1[0].share - I1 / (I1 + I2)) < 1e-12 && Math.abs(m1[1].share - I2 / (I1 + I2)) < 1e-12, 'stiffness shares ' + JSON.stringify(m1.map((m) => m.share)));
     assert.deepStrictEqual(m1.map((m) => m.section_id), ['S1', 'S2']);
+    // 결정 S3′(설계 매뉴얼 II-1A 의 가정 (c)): 랩의 판정은 두 부재 강도의 합 — 부재 i 의 몫 = φMn,i / Σ φMn (M), φVn,i / Σ φVn (V)
+    const sum = lap1.sum_of_strengths;
+    const fM = m1.map((m) => m.design_strength), fV = m1.map((m) => m.shear_strength);
+    assert(lap1.strength_basis === 'sum_of_strengths' && sum && sum.basis === 'sum_of_strengths' && !('share_basis' in lap1) && !('reference_sum_of_strengths' in lap1), 'strength basis');
+    assert(Math.abs(sum.design_strength_sum - (fM[0] + fM[1])) < 1e-9 && Math.abs(sum.flexure_ratio - lap1.Mu / (fM[0] + fM[1])) < 1e-12, 'sum of strengths ' + JSON.stringify(sum));
+    assert(Math.abs(sum.flexure_ratio - 0.7367) < 5e-4, 'II-1A lap flexure ratio 144.42 / (111.81 + 84.23) = 0.7367: ' + sum.flexure_ratio);
+    assert(m1.every((m, i) => Math.abs(m.share - fM[i] / (fM[0] + fM[1])) < 1e-12 && Math.abs(m.share_V - fV[i] / (fV[0] + fV[1])) < 1e-12), 'strength shares ' + JSON.stringify(m1.map((m) => [m.share, m.share_V])));
+    assert(m1.every((m) => Math.abs(m.Mu / m.design_strength - sum.flexure_ratio) < 1e-12), 'each member: Mu_i / φMn,i = M / Σ φMn');
+    assert(Math.abs(sum.shear_ratio - lap1.Vu / (fV[0] + fV[1])) < 1e-12 && m1.every((m) => Math.abs(m.Vu / m.shear_strength - sum.shear_ratio) < 1e-12), 'shear by the sum');
+    assert(Math.abs(m1[0].share_stiffness - I1 / (I1 + I2)) < 1e-12 && Math.abs(m1[1].share_stiffness - I2 / (I1 + I2)) < 1e-12, 'stiffness shares (reference) ' + JSON.stringify(m1.map((m) => m.share_stiffness)));
     const gov = m1[lap1.governing_member - 1];
     assert(gov.utilization >= Math.max(...m1.map((m) => m.utilization)) - 1e-12 && lap1.result.utilization === gov.utilization && lap1.section_id === gov.section_id, 'governing member decides');
-    const ref = lap1.reference_sum_of_strengths;
-    assert(Math.abs(ref.ratio - lap1.Mu / (m1[0].design_strength + m1[1].design_strength)) < 1e-12 && ref.ratio < gov.utilization, 'sum-of-strengths reference ' + JSON.stringify(ref));
-    assert(Math.abs(m1[0].Mu - lap1.Mu * m1[0].share) < 1e-9, 'member Mu = share · M');
+    // 강성의 몫으로 본 값은 참고(판정에 쓰지 않음) — 오늘까지의 판정비 0.7426 | 0.8607(몫 0.5418 | 0.4582)
+    const ref = lap1.reference_stiffness_share;
+    assert(ref && ref.basis === 'stiffness_Ix' && ref.members.length === 2 && Math.abs(ref.shares[0] - 0.5418) < 5e-4 && ref.governing_member === 2, 'stiffness reference ' + JSON.stringify(ref).slice(0, 400));
+    assert(Math.abs(ref.members[0].utilization - 0.7426) < 2e-3 && Math.abs(ref.members[1].utilization - 0.8607) < 2e-3 && ref.ratio === ref.members[1].utilization, 'reference ratios ' + JSON.stringify(ref.members));
+    assert(ref.ratio > lap1.result.utilization, 'the stiffness reference is not the verdict');
+    // 엔진 본문: 강성의 몫으로 한 번(강도를 얻으려고), 강도의 몫으로 한 번(판정) — 부재마다 그 단면
     const lapEng = two.designs.filter((d) => d.lap_region && d.check_location.region === lap1.id && d.check_location.check_point === 'M_max');
-    assert.deepStrictEqual(lapEng.map((d) => d.section.thickness).sort(), [0.059, 0.07], 'each member checked with its own section');
-    notes.push(`P3: lap ${lap1.id}: shares ${m1.map((m) => m.share.toFixed(4)).join(' | ')}, ratios ${m1.map((m) => m.utilization).join(' | ')} → governing ${gov.section_id} ${gov.utilization}; `
-      + `sum-of-strengths reference ${ref.ratio.toFixed(4)} (M ${lap1.Mu.toFixed(2)} / (${m1[0].design_strength.toFixed(2)} + ${m1[1].design_strength.toFixed(2)}) kip-in)`);
+    assert.deepStrictEqual(lapEng.map((d) => d.section.thickness).sort(), [0.059, 0.059, 0.07, 0.07], 'each member checked with its own section, two passes');
+    const fin = lapEng.filter((d) => m1.some((m) => m.section_id === d.check_location.section_id && d.check_location.member_share === m.share));
+    assert(fin.length === 2 && fin.every((d) => d.check_location.member_share_V !== undefined), 'final bodies carry the strength shares');
+    notes.push(`P3: lap ${lap1.id}: Mu ${lap1.Mu.toFixed(2)} / (${fM[0].toFixed(2)} + ${fM[1].toFixed(2)}) = ${sum.flexure_ratio.toFixed(4)} kip-in, Vu ${lap1.Vu.toFixed(3)} / (${fV[0].toFixed(3)} + ${fV[1].toFixed(3)}) = ${sum.shear_ratio.toFixed(4)}; `
+      + `strength shares M ${m1.map((m) => m.share.toFixed(4)).join(' | ')} V ${m1.map((m) => m.share_V.toFixed(4)).join(' | ')}, member ratios ${m1.map((m) => m.utilization).join(' | ')} (governing ${gov.section_id}); `
+      + `stiffness reference ${ref.shares.map((s) => s.toFixed(4)).join(' | ')} → ${ref.members.map((x) => x.utilization).join(' | ')}`);
     // 한 단면(x059)의 단독 실행: 같은 정모멘트 구간(데크 구속, Ly 0)의 강도가 같다
     const keepCase = JSON.parse(JSON.stringify(p.__testGetCase().state));
     ok(await ai({ action: 'save_case' }), 'save case A');
@@ -285,11 +320,22 @@ async function main() {
     // 검증 · 보고서
     const v = ok(await ai({ action: 'validate_design', detail: 'full' }), 'validate');
     const items = v.items || v.validation || [];
-    for (const id of ['val.load_analysis.span_sections', 'val.load_analysis.deck_section.2', 'val.load_analysis.dsm_section.2', 'val.load_analysis.lap_members']) {
+    for (const id of ['val.load_analysis.span_sections', 'val.load_analysis.deck_once', 'val.load_analysis.dsm_section.2', 'val.load_analysis.lap_members']) {
       assert(items.some((c) => c.id === id), 'validation item ' + id + ' in ' + items.filter((c) => /단면|랩 —/.test(c.item)).map((c) => c.id));
     }
     const rv = p.__testReview('SI');
     assert(/경간마다 단면/.test(rv.reportHtml) && /랩 구간 — 두 부재/.test(rv.reportHtml) && /강도의 합/.test(rv.reportHtml) && /9CS2\.5x059/.test(rv.reportHtml), 'report blocks');
+
+    // ── P3c: 결정 S3′ — 한 부재의 강도를 얻지 못하면(엔진 답에서 S2 의 휨 설계강도를 지움) 그 랩은 평가하지 못함(첫 검토의 합격이 판정이 되지 않는다) ──
+    tamper = (method, params, res) => (method === 'aisi_design' && params && params.lap_region && params.check_location && params.check_location.section_id === 'S2'
+      && res && typeof res === 'object' ? { ...res, design_strength: null, display_unrounded: { ...(res.display_unrounded || {}), design_strength: null } } : res);
+    let noStr;
+    try { noStr = await pressPurlin(); } finally { tamper = null; }
+    const lapsNs = noStr.res.regions.filter((g) => g.kind === 'lap');
+    assert(lapsNs.length === 6 && lapsNs.every((g) => g.result.pass === null && g.result.utilization === null && g.not_evaluated_reason_code === 'host.purlin.lap_strength_unknown'
+      && g.lap_members.every((m) => m.share === null)), 'member strength missing → lap not evaluated ' + JSON.stringify(lapsNs.map((g) => [g.id, g.result.pass, g.not_evaluated_reason_code])));
+    assert(noStr.res.pass !== true && (noStr.res.notices || []).some((n) => n && n.code === 'host.purlin.region_not_evaluated'), 'no overall pass');
+    notes.push(`P3c: S2 strength removed from the engine reply → ${lapsNs.length} lap regions not evaluated (host.purlin.lap_strength_unknown), overall ${noStr.res.pass}`);
 
     // ── P4: 춤이 다른 랩 · 지운 단면 · 직접 고친 모델 ──
     ok(await ai({ action: 'set_case_inputs', inputs: {}, sections: [{ id: 'S2', name: null, template: 'lippedc', params: { ...C059, H: 10 } }] }), 'S2 deeper');
@@ -348,7 +394,8 @@ async function main() {
     assert(sumSI.bytes <= 40 * KB, `design_purlin summary ${sumSI.bytes} B ≤ 40 KB (largest: ${topKeys(sumSI.data)}; regions: ${regKeys(sumSI.data)}; elsewhere: ${JSON.stringify((sumSI.data.notices_elsewhere || []).map((n) => [String(n.text).slice(0, 50), (n.where || []).length]))})`);
     assert(Array.isArray(sumSI.data.sections) && !JSON.stringify(sumSI.data.sections).includes('load_factors'), 'summary sections without curves');
     const lapLine = sumSI.data.regions.find((g) => g.lap_members && g.lap_members[0].section_id !== g.lap_members[1].section_id);
-    assert(lapLine && typeof lapLine.reference_sum_of_strengths_ratio === 'number', 'summary lap line with both members');
+    assert(lapLine && typeof lapLine.sum_of_strengths.flexure_ratio === 'number' && typeof lapLine.reference_stiffness_share_ratio === 'number'
+      && lapLine.lap_members.every((x) => typeof x.share === 'number'), 'summary lap line with both members ' + JSON.stringify(lapLine));
     assert(Math.abs(sumSI.data.sections.find((x) => x.id === 'S2').params.t - 0.059 * 25.4) < 1e-9, 'section params in mm');
     const fullSI = await tool('run_case_check', { what: 'member', units: 'SI', detail: 'full' });
     assert(!fullSI.data.si_unconverted, 'full SI: no unconverted key ' + JSON.stringify([...new Set((fullSI.data.si_unconverted || []).map((x) => x.replace(/\[\d+\]/g, '[]')))]).slice(0, 1500));
@@ -372,11 +419,11 @@ async function main() {
     // 6(a): 하중 해석의 기본 답 — 경간마다 짧은 줄(§I6.2.1 · 데크), 전체는 detail:'full'
     const alS = await tool('analyze_loads', { ...II1A, sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'] });
     const alF = await tool('analyze_loads', { ...II1A, sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'], detail: 'full' });
-    const ib = alS.data.auto_params.i621_by_span, db = alS.data.auto_params.deck_by_span;
+    const ib = alS.data.auto_params.i621_by_span, db = alS.data.auto_params.deck_basis;
     assert(ib.length === 4 && ib.every((b) => !('check' in b) && Object.keys(b).every((k) => ['span', 'section_id', 'R', 'real_span', 'failing'].includes(k))) && ib[1].section_id === 'S2', 'compact i621 rows ' + JSON.stringify(ib));
-    assert(db.every((d) => Object.keys(d).join() === 'span,section_id,kphi,kx'), 'compact deck rows ' + JSON.stringify(db));
-    assert(/i621_by_span/.test(alS.data.more) && /deck_by_span/.test(alS.data.more), 'more names the shortened blocks');
-    assert(alF.data.auto_params.i621_by_span[0].check && alF.data.auto_params.deck_by_span[0].kphi_method, 'full keeps the objects');
+    assert(db.section_id === 'S2' && db.by_section.every((d) => Object.keys(d).join() === 'section_id,spans,kphi,kx,adopted') && !('deck_by_span' in alS.data.auto_params), 'compact deck rows ' + JSON.stringify(db));
+    assert(/i621_by_span/.test(alS.data.more) && /deck_basis/.test(alS.data.more), 'more names the shortened blocks');
+    assert(alF.data.auto_params.i621_by_span[0].check && alF.data.auto_params.deck_basis.by_section[0].kphi_method, 'full keeps the objects');
     // 검증 때 121.3 KB(경간마다 §I6.2.1 검토 전부 17.8 KB · 데크 블록 5.3 KB) — 짧은 줄로 약 95 KB
     assert(alS.bytes <= 100 * KB, `analyze_loads default reply ${alS.bytes} B`);
     notes.push(`P6 4a · 6a: reset notice; analyze_loads default ${alS.bytes} B (full ${alF.bytes} B), per-span rows compact`);

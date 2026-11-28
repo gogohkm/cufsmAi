@@ -342,11 +342,9 @@ def design_lap_connection(params: dict) -> dict:
             _sres2 = shear_strength(two['h_web'] or max(two['d'] - 2.0 * two['t'], 0.0), two['t'], Fy)
             if _sres2['Vn'] > 0:
                 Vn2_in, vn2_auto = _sres2['Vn'], True
-        if Mu > 0 and Se > 0:
-            if not two['Se']:
-                two_flex_missing = _nt('lap.reason.member2_value_missing', key='Se_2')
-            elif two['shares'] is None:
-                two_flex_missing = _nt('lap.reason.lap_shares_need_ixx')
+        if Mu > 0 and Se > 0 and not two['Se']:
+            # 결정 S3′: 랩의 강도는 두 부재 강도의 합 — 부재 2 의 Se 가 없으면 판정 없음(강성 몫은 참고라 없어도 된다)
+            two_flex_missing = _nt('lap.reason.member2_value_missing', key='Se_2')
 
     _flex = {}   # 계산서(design_checks) 재료 — 아래 휨 검토가 쓴 값
     flexure_ok = True
@@ -362,15 +360,18 @@ def design_lap_connection(params: dict) -> dict:
         Mn_lap = Mnl_single * n_members  # kip-in
         two_local = None
         if two is not None:
-            # 결정 S3: 부재 i 가 Mu·s_i 를 진다 → Mu ≤ φ Mnℓ,i / s_i. 랩의 강도 = min_i(Mnℓ,i / s_i).
-            # 같은 두 부재(s = 0.5)면 2 Mnℓ — 오늘과 같다. 매뉴얼의 강도의 합(가정 (c))은 참고값.
+            # 결정 S3′(2026-11-28 오후): 랩의 강도 = 두 부재 강도의 합 Mn,lap = Mnℓ,1 + Mnℓ,2 (설계 매뉴얼 II-1A · II-2A 의
+            # 가정 (c)). 같은 두 부재면 2 Mnℓ — 오늘과 같다. 강성 몫(s_i = I_i / ΣI)으로 본 min_i(Mnℓ,i / s_i) 는 참고값.
             sh = two['shares']
             Mnl_m = [Se * Fy, two['Se'] * Fy]
-            cand = [Mnl_m[0] / sh[0], Mnl_m[1] / sh[1]]
-            gm = 0 if cand[0] <= cand[1] else 1
-            Mn_lap, Mnl_single = cand[gm], Mnl_m[gm]
-            two_local = dict(Mnl=Mnl_m, shares=sh, Mn_member=cand, governing_member=gm + 1,
-                             Se=[Se, two['Se']], Mn_sum=Mnl_m[0] + Mnl_m[1])
+            Mn_lap = Mnl_m[0] + Mnl_m[1]
+            Mnl_single = Mnl_m[0]
+            stiff = None
+            if sh:
+                cand = [Mnl_m[0] / sh[0], Mnl_m[1] / sh[1]]
+                gm = 0 if cand[0] <= cand[1] else 1
+                stiff = dict(shares=sh, Mn_member=cand, governing_member=gm + 1, Mn_lap=cand[gm])
+            two_local = dict(Mnl=Mnl_m, Se=[Se, two['Se']], Mn_sum=Mn_lap, stiffness=stiff)
 
         if design_method == 'LRFD':
             phi_b = 0.90
@@ -393,9 +394,10 @@ def design_lap_connection(params: dict) -> dict:
         _flex['local'] = dict(Mnl_single=Mnl_single, Mn_lap=Mn_lap, phi_Mn_lap=phi_Mn_lap, dcr=flexure_dcr,
                               ok=flexure_ok, n_members=n_members)
         if two_local is not None:
-            two_local['phi_Mn_sum'] = (0.90 * two_local['Mn_sum'] if design_method == 'LRFD'
-                                       else two_local['Mn_sum'] / 1.67)
-            two_local['dcr_sum'] = Mu / two_local['phi_Mn_sum'] if two_local['phi_Mn_sum'] > 0 else None
+            _st = two_local['stiffness']
+            if _st is not None:
+                _st['phi_Mn_lap'] = 0.90 * _st['Mn_lap'] if design_method == 'LRFD' else _st['Mn_lap'] / 1.67
+                _st['dcr'] = Mu / _st['phi_Mn_lap'] if _st['phi_Mn_lap'] > 0 else None
             _flex['local']['two'] = two_local
 
         if two_local is None:
@@ -411,18 +413,18 @@ def design_lap_connection(params: dict) -> dict:
                 'pass': flexure_ok,
             })
         else:
-            _m, _s = two_local['Mnl'], two_local['shares']
+            _m, _st = two_local['Mnl'], two_local['stiffness']
             steps.append({
-                'step': 8, 'name': 'Lap Flexural Strength (§F, two members by stiffness share — decision S3)',
+                'step': 8, 'name': 'Lap Flexural Strength (§F, sum of the two members — Design Manual II-1A / II-2A (c))',
                 'value': round(flexure_dcr, 3), 'unit': '',
                 'formula': (
                     f'Mnl1 = Se×Fy = {Se:.4f}×{Fy:.2f} = {_m[0]:.2f}, Mnl2 = Se_2×Fy = {two["Se"]:.4f}×{Fy:.2f} = '
-                    f'{_m[1]:.2f} kip-in, s1 = {_s[0]:.4f}, s2 = {_s[1]:.4f}, '
-                    f'Mn_lap = min(Mnl1/s1, Mnl2/s2) = {Mn_lap:.2f} kip-in (member {two_local["governing_member"]}), '
+                    f'{_m[1]:.2f} kip-in, Mn_lap = Mnl1 + Mnl2 = {Mn_lap:.2f} kip-in, '
                     f'{"φ" if design_method == "LRFD" else "1/Ω"}Mn = {phi_Mn_lap:.2f} kip-in, '
-                    f'Mu = {Mu:.2f} kip-in, DCR = {flexure_dcr:.3f} '
-                    f'[reference — sum of strengths (Manual II-1A/II-2A (c)): Mn = {two_local["Mn_sum"]:.2f} kip-in]'
-                ),
+                    f'Mu = {Mu:.2f} kip-in, DCR = {flexure_dcr:.3f}'
+                ) + (f' [reference only — stiffness shares s1 = {_st["shares"][0]:.4f}, s2 = {_st["shares"][1]:.4f}: '
+                     f'min(Mnl1/s1, Mnl2/s2) = {_st["Mn_lap"]:.2f} kip-in (member {_st["governing_member"]}), '
+                     f'DCR = {_st["dcr"]:.3f}]' if _st is not None else ''),
                 'pass': flexure_ok,
             })
         if flexure_ok is False:      # None(진술 없음 · 판정 없음)은 부족이 아니다 — 2026-11-24 K4f
@@ -453,12 +455,15 @@ def design_lap_connection(params: dict) -> dict:
         elif Mnd_single and Mnd_single > 0:
             Mnd_lap = Mnd_single * n_members
             if two is not None:
-                _cd = [Mnd_single / two['shares'][0], two['Mnd'] / two['shares'][1]]
-                _gd = 0 if _cd[0] <= _cd[1] else 1
-                Mnd_lap = _cd[_gd]
-                _flex['dist_two'] = dict(Mnd=[Mnd_single, two['Mnd']], shares=two['shares'], Mn_member=_cd,
-                                         governing_member=_gd + 1, Mnd_sum=Mnd_single + two['Mnd'])
-                Mnd_single = [Mnd_single, two['Mnd']][_gd]
+                # 결정 S3′: 두 부재 강도의 합(같은 두 부재면 2 Mnd — 오늘과 같다). 강성 몫의 값은 참고
+                _dm = [Mnd_single, two['Mnd']]
+                Mnd_lap = _dm[0] + _dm[1]
+                _dst = None
+                if two['shares']:
+                    _cd = [_dm[0] / two['shares'][0], _dm[1] / two['shares'][1]]
+                    _gd = 0 if _cd[0] <= _cd[1] else 1
+                    _dst = dict(shares=two['shares'], Mn_member=_cd, governing_member=_gd + 1, Mnd_lap=_cd[_gd])
+                _flex['dist_two'] = dict(Mnd=_dm, Mnd_sum=Mnd_lap, stiffness=_dst)
             if design_method == 'LRFD':
                 phi_Mnd_lap = 0.90 * Mnd_lap
             else:
@@ -478,8 +483,7 @@ def design_lap_connection(params: dict) -> dict:
                     f'DCR = {dist_dcr:.3f}'
                 ) if 'dist_two' not in _flex else (
                     f'Mnd1 = {_flex["dist_two"]["Mnd"][0]:.2f}, Mnd2 = {_flex["dist_two"]["Mnd"][1]:.2f} kip-in, '
-                    f'Mnd_lap = min(Mnd1/s1, Mnd2/s2) = {Mnd_lap:.2f} kip-in '
-                    f'(member {_flex["dist_two"]["governing_member"]}), '
+                    f'Mnd_lap = Mnd1 + Mnd2 = {Mnd_lap:.2f} kip-in (sum of strengths), '
                     f'{"φ" if design_method == "LRFD" else "1/Ω"}Mnd = {phi_Mnd_lap:.2f} kip-in, '
                     f'DCR = {dist_dcr:.3f}'
                 )),
@@ -509,22 +513,24 @@ def design_lap_connection(params: dict) -> dict:
                 phi_Vn_lap = (Vn * n_members_v) / 1.60
             phi_Mn_h2 = phi_Mn_lap
             if two is not None:
-                # 결정 S3: 부재 i 는 (s_i Mu, s_i Vu) 를 진다 — 부재마다 H2 를 보고 큰 쪽. 같은 두 부재면 오늘과 같다
-                _sh = two['shares']
-                _Mn = _flex['local']['two']['Mnl']
+                # 결정 S3′: H2 도 두 부재 강도의 합으로 — Ma = φ(Mnℓ,1 + Mnℓ,2)(국부 휨과 같은 값), Va = φ(Vn,1 + Vn,2).
+                # 같은 두 부재면 2 Vn — 오늘과 같다. 강성 몫으로 본 부재마다의 H2(큰 쪽)는 참고값
                 _Vn = [Vn, Vn2_in]
-                if design_method == 'LRFD':
-                    _pm = [0.90 * (_Mn[i] / _sh[i]) for i in (0, 1)]
-                    _pv = [0.95 * (_Vn[i] / _sh[i]) for i in (0, 1)]
-                else:
-                    _pm = [(_Mn[i] / _sh[i]) / 1.67 for i in (0, 1)]
-                    _pv = [(_Vn[i] / _sh[i]) / 1.60 for i in (0, 1)]
-                _mv = [math.sqrt((Mu / _pm[i]) ** 2 + (Vu / _pv[i]) ** 2) for i in (0, 1)]
-                _gh = 0 if _mv[0] >= _mv[1] else 1
-                phi_Mn_h2, phi_Vn_lap = _pm[_gh], _pv[_gh]
-                Vn = _Vn[_gh]
-                h2_two = dict(Vn=_Vn, vn_auto=[vn_auto, vn2_auto], phi_Mn=_pm, phi_Vn=_pv, mv=_mv,
-                              governing_member=_gh + 1, shares=_sh)
+                phi_Vn_lap = 0.95 * (_Vn[0] + _Vn[1]) if design_method == 'LRFD' else (_Vn[0] + _Vn[1]) / 1.60
+                _hst = None
+                _sh = two['shares']
+                if _sh:
+                    _Mn = _flex['local']['two']['Mnl']
+                    if design_method == 'LRFD':
+                        _pm = [0.90 * (_Mn[i] / _sh[i]) for i in (0, 1)]
+                        _pv = [0.95 * (_Vn[i] / _sh[i]) for i in (0, 1)]
+                    else:
+                        _pm = [(_Mn[i] / _sh[i]) / 1.67 for i in (0, 1)]
+                        _pv = [(_Vn[i] / _sh[i]) / 1.60 for i in (0, 1)]
+                    _mv = [math.sqrt((Mu / _pm[i]) ** 2 + (Vu / _pv[i]) ** 2) for i in (0, 1)]
+                    _gh = 0 if _mv[0] >= _mv[1] else 1
+                    _hst = dict(shares=_sh, mv=_mv, governing_member=_gh + 1, ratio=_mv[_gh])
+                h2_two = dict(Vn=_Vn, vn_auto=[vn_auto, vn2_auto], Vn_sum=_Vn[0] + _Vn[1], stiffness=_hst)
             # Eq. H2-1 꼴 √((M/Ma)² + (V/Va)²) ≤ 1.0 — 부재 H2 와 같은 꼴이어야 '비 ≤ 1.0' 이 어디서나 같은 뜻이다
             # (제곱합은 판정은 같지만 다른 비와 견줄 수 없다).
             if phi_Vn_lap > 0:
@@ -537,8 +543,7 @@ def design_lap_connection(params: dict) -> dict:
             _flex['h2'] = dict(Vn=Vn, vn_auto=vn_auto, phi_Vn_lap=phi_Vn_lap, mv=mv_term, ok=mv_ok,
                                m_ratio=mv_m, v_ratio=mv_v)
             if h2_two is not None:
-                _flex['h2'].update(two=h2_two, phi_Mn_lap=phi_Mn_h2,
-                                   vn_auto=h2_two['vn_auto'][h2_two['governing_member'] - 1])
+                _flex['h2'].update(two=h2_two, phi_Mn_lap=phi_Mn_h2)
             flexure_ok = _and3(flexure_ok, mv_ok)
             flexure_dcr_governing = max(flexure_dcr_governing or 0, mv_term)
             steps.append({
@@ -548,7 +553,9 @@ def design_lap_connection(params: dict) -> dict:
                     f'√((Mu/{"φ" if design_method == "LRFD" else "1/Ω"}Mn)² + '
                     f'(Vu/{"φ" if design_method == "LRFD" else "1/Ω"}Vn)²) = '
                     f'√(({Mu:.2f}/{phi_Mn_h2:.2f})² + ({Vu:.3f}/{phi_Vn_lap:.3f})²) = {mv_term:.3f} ≤ 1.0'
-                ) + (f' (member {h2_two["governing_member"]}: φMn,i/s_i, φVn,i/s_i — decision S3)'
+                ) + ((f' (sum of the two members: Vn,1 + Vn,2 = {h2_two["Vn"][0]:.3f} + {h2_two["Vn"][1]:.3f} kips'
+                      + (f'; reference only — stiffness shares, member {h2_two["stiffness"]["governing_member"]}: '
+                         f'{h2_two["stiffness"]["ratio"]:.3f}' if h2_two['stiffness'] else '') + ')')
                      if h2_two is not None else ''),
                 'pass': mv_ok,
             })
@@ -572,10 +579,10 @@ def design_lap_connection(params: dict) -> dict:
         warnings.append(
             _nt('lap.warning.se_lap')
         )
-        if Sf_only > 0 and Fy > 0 and (two is None or (two['Sf'] and two['shares'])):
+        if Sf_only > 0 and Fy > 0 and (two is None or two['Sf']):
             Mn_ref = 2 * Sf_only * Fy
             if two is not None:
-                Mn_ref = min(Sf_only * Fy / two['shares'][0], two['Sf'] * Fy / two['shares'][1])
+                Mn_ref = Sf_only * Fy + two['Sf'] * Fy      # 결정 S3′: 두 부재의 합
             phi_ref = 0.90 * Mn_ref if design_method == 'LRFD' else Mn_ref / 1.67
             flexure_reference_dcr = Mu / phi_ref if phi_ref > 0 else None
             _flex['reference'] = dict(Mn_ref=Mn_ref, phi_ref=phi_ref, dcr=flexure_reference_dcr)
@@ -792,16 +799,19 @@ def _demote_all(checks, reason):
 
 
 def _two_member_summary(two, d, t, Se, params, arm_member, fast, flex):
-    """두 부재 랩의 결과 키(더하기만): 부재마다의 값과 항목마다 어느 부재가 정했는가."""
+    """두 부재 랩의 결과 키(더하기만): 부재마다의 값과 항목마다 어느 부재가 정했는가. 결정 S3′: 랩의 휨 · H2 는 두 부재
+    강도의 합(member_governing 의 그 항목은 'sum'), 강성 몫은 참고(flexure_reference_stiffness_share)."""
     loc = (flex.get('local') or {}).get('two')
     dist = flex.get('dist_two')
     h2 = (flex.get('h2') or {}).get('two')
     sh = two['shares']
     members = [
         {'member': 1, 't': t, 'd': d, 'Se': Se or None, 'Sf': params.get('Sf'), 'Mnd': params.get('Mnd'),
-         'Ixx': two['Ixx'], 'share': sh[0] if sh else None},
+         'Ixx': two['Ixx'], 'stiffness_share': sh[0] if sh else None,
+         'Mnl': loc['Mnl'][0] if loc else None, 'Vn': h2['Vn'][0] if h2 else None},
         {'member': 2, 't': two['t'], 'd': two['d'], 'Se': two['Se'], 'Sf': two['Sf'], 'Mnd': two['Mnd'],
-         'Ixx': two['Ixx_2'], 'share': sh[1] if sh else None},
+         'Ixx': two['Ixx_2'], 'stiffness_share': sh[1] if sh else None,
+         'Mnl': loc['Mnl'][1] if loc else None, 'Vn': h2['Vn'][1] if h2 else None},
     ]
     thin = 1 if t < two['t'] else (2 if two['t'] < t else 'both')
     gov = {
@@ -809,25 +819,27 @@ def _two_member_summary(two, d, t, Se, params, arm_member, fast, flex):
         'fastener_orientation': {'t1_head_side': fast[0], 't2_far_side': fast[1]},
         'lever_arm': arm_member,
         'block_shear': thin,
-        'flexure_local': loc['governing_member'] if loc else None,
-        'flexure_distortional': dist['governing_member'] if dist else None,
-        'bending_shear': h2['governing_member'] if h2 else None,
+        'flexure_local': 'sum' if loc else None,
+        'flexure_distortional': 'sum' if dist else None,
+        'bending_shear': 'sum' if h2 else None,
     }
     out = {
         'lap_two_members': True,
         'lap_members': members,
         'share_by_stiffness': sh,
-        'share_basis': 'stiffness_Ix',
-        'reference_basis': 'sum_of_strengths',
+        'strength_basis': 'sum_of_strengths',
+        'reference_basis': 'stiffness_share',
         'same_members': two['same'],
         'depth_mismatch': two['depth_mismatch'],
         'lap_evaluable': True,
         'member_governing': gov,
         'member2_defaulted': list(two['defaulted']),
     }
-    if loc:
-        out['flexure_reference_sum_of_strengths'] = {'Mn_lap': loc['Mn_sum'], 'phi_Mn_lap': loc['phi_Mn_sum'],
-                                                     'dcr': loc['dcr_sum']}
+    st = (loc or {}).get('stiffness')
+    if st:
+        out['flexure_reference_stiffness_share'] = {'Mn_lap': st['Mn_lap'], 'phi_Mn_lap': st['phi_Mn_lap'],
+                                                    'dcr': st['dcr'], 'governing_member': st['governing_member'],
+                                                    'shares': st['shares']}
     return out
 
 
@@ -876,7 +888,7 @@ def _second_member(params: dict, d: float, t: float, Fy) -> dict | None:
     """겹친 두 번째 부재의 입력(이름 끝 _2) — 하나도 없으면 None(오늘과 같은 길). t_2 · d_2 가 없으면 부재 1 의 값을
     쓰고 defaulted 에 밝힌다. Se_2 · Mnd_2 는 두 부재가 같을 때(t · d · 준 Se 가 같고 Ixx 가 다르지 않을 때)만 부재 1 의
     값을 쓴다 — 다르면 없는 값은 없는 것으로(그 검토는 판정 없음). 강성 몫 s_i = I_i / (I_1 + I_2) 는 Ixx · Ixx_2 로,
-    없으면 같은 부재일 때만 0.5 · 0.5 (결정 S3)."""
+    없으면 같은 부재일 때만 0.5 · 0.5 — 참고값일 뿐(결정 S3′: 랩의 강도는 두 부재 강도의 합)."""
     keys = ('t_2', 'd_2', 'Se_2', 'Sf_2', 'Mnd_2', 'Vn_2', 'h_web_2', 'Ixx_2')
     if all(params.get(k) is None for k in keys):
         return None

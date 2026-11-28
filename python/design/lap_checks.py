@@ -187,11 +187,9 @@ def build(ck: dict) -> list:
                               inputs=[q('Se_2', tw['Se'][1], 'section_modulus', src('user_input', key='Se_2')),
                                       q('Fy', ck['Fy'], 'stress', src('material', key='Fy'))],
                               result=q('Mnℓ,2', tw['Mnl'][1], 'moment'))
-                i_l = tr.add('equation', 'Mn,lap = min(Mnℓ,1 / s1, Mnℓ,2 / s2),  s_i = I_i / (I_1 + I_2)  '
-                             '(stiffness share, decision S3 — design assumption)',
-                             inputs=[tr.ref(i_m), q('s1', tw['shares'][0], 'dimensionless', _share_src(ck)),
-                                     tr.ref(i_m2), q('s2', tw['shares'][1], 'dimensionless', _share_src(ck))],
-                             result=q('Mn,lap', lo['Mn_lap'], 'moment'), governing_member=tw['governing_member'])
+                i_l = tr.add('equation', 'Mn,lap = Mnℓ,1 + Mnℓ,2  (sum of the strengths of the two lapped members, '
+                             'Design Manual II-1A / II-2A assumption (c))',
+                             inputs=[tr.ref(i_m), tr.ref(i_m2)], result=q('Mn,lap', lo['Mn_lap'], 'moment'))
             i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, lo['phi_Mn_lap'],
                                        'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
@@ -205,12 +203,15 @@ def build(ck: dict) -> list:
             if not fx.get('ltb_unstated'):
                 tr.steps[i_m]['assumption_source'] = src('user_input', key='lap_restrained',
                                                          note=_nt('lap.note.fn_fy_lapped_section'))
-            two_extra = {} if lo.get('two') is None else {
-                'governing_member': lo['two']['governing_member'], 'share_basis': 'stiffness_Ix',
-                'reference_sum_of_strengths': {'capacity': q('φbMn,sum' if dm == 'LRFD' else 'Mn,sum/Ωb',
-                                                             lo['two']['phi_Mn_sum'], 'moment'),
-                                               'ratio': lo['two']['dcr_sum'],
-                                               'basis': _nt('lap.label.sum_of_strengths_reference')}}
+            two_extra = {}
+            if lo.get('two') is not None:
+                two_extra['strength_basis'] = 'sum_of_strengths'
+                st = lo['two'].get('stiffness')
+                if st:
+                    two_extra['reference_stiffness_share'] = {
+                        'capacity': q('φbMn,s' if dm == 'LRFD' else 'Mn,s/Ωb', st['phi_Mn_lap'], 'moment'),
+                        'ratio': st['dcr'], 'governing_member': st['governing_member'], 'shares': st['shares'],
+                        'basis': _nt('lap.label.stiffness_share_reference')}
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict=v, demand=mu,
                                      reason=(LAP_LTB_UNSTATED_TOOL if unstated else None), **two_extra,
                                      reference=({'capacity': q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb',
@@ -240,12 +241,11 @@ def build(ck: dict) -> list:
                                                                       src('user_input', key='Mnd'))],
                              result=q('Mnd,lap', ds['Mnd_lap'], 'moment'))
             else:
-                i_l = tr.add('equation', 'Mnd,lap = min(Mnd,1 / s1, Mnd,2 / s2)  (stiffness share, decision S3)',
+                i_l = tr.add('equation', 'Mnd,lap = Mnd,1 + Mnd,2  (sum of the two lapped members, Design Manual '
+                             'II-1A / II-2A assumption (c))',
                              inputs=[q('Mnd', dtw['Mnd'][0], 'moment', src('user_input', key='Mnd')),
-                                     q('s1', dtw['shares'][0], 'dimensionless', _share_src(ck)),
-                                     q('Mnd_2', dtw['Mnd'][1], 'moment', src('user_input', key='Mnd_2')),
-                                     q('s2', dtw['shares'][1], 'dimensionless', _share_src(ck))],
-                             result=q('Mnd,lap', ds['Mnd_lap'], 'moment'), governing_member=dtw['governing_member'])
+                                     q('Mnd_2', dtw['Mnd'][1], 'moment', src('user_input', key='Mnd_2'))],
+                             result=q('Mnd,lap', ds['Mnd_lap'], 'moment'))
             i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, ds['phi_Mnd_lap'],
                                        'φbMnd,lap' if dm == 'LRFD' else 'Mnd,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
@@ -278,15 +278,14 @@ def build(ck: dict) -> list:
                 i_vl = tr.add('equation', 'Vn,lap = 2 Vn  (two lapped members)',
                               inputs=[vn, q('members', 2, 'count', spec())], result=q('Vn,lap', 2 * h['Vn'], 'force'))
             else:
-                g = htw['governing_member'] - 1
-                if g == 1:
-                    vn = q('Vn_2', h['Vn'], 'force', src('specification', note=_nt('lap.note.g2_1_g2_one_web_computed'))
-                           if h['vn_auto'] else src('user_input', key='Vn_2'))
-                i_vl = tr.add('equation', f'Vn,lap = Vn,{g + 1} / s{g + 1}  (member {g + 1} carries s{g + 1} Vu, '
-                              'decision S3)',
-                              inputs=[vn, q(f's{g + 1}', htw['shares'][g], 'dimensionless', _share_src(ck))],
-                              result=q('Vn,lap', h['Vn'] / htw['shares'][g], 'force'),
-                              governing_member=htw['governing_member'])
+                # 결정 S3′: 두 부재 전단강도의 합(설계 매뉴얼 II-1A · II-2A 의 가정 (c))
+                vn1 = q('Vn', htw['Vn'][0], 'force', src('specification', note=_nt('lap.note.g2_1_g2_one_web_computed'))
+                        if htw['vn_auto'][0] else src('user_input', key='Vn'))
+                vn2 = q('Vn_2', htw['Vn'][1], 'force', src('specification', note=_nt('lap.note.g2_1_g2_one_web_computed'))
+                        if htw['vn_auto'][1] else src('user_input', key='Vn_2'))
+                i_vl = tr.add('equation', 'Vn,lap = Vn + Vn_2  (sum of the two lapped members, Design Manual II-1A / '
+                              'II-2A assumption (c))',
+                              inputs=[vn1, vn2], result=q('Vn,lap', htw['Vn_sum'], 'force'))
             v_sym = 'φvVn,lap' if dm == 'LRFD' else 'Vn,lap/Ωv'
             m_sym = 'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb'
             i_v = design_strength_step(tr, dm, tr.ref(i_vl), 0.95, 1.60, h['phi_Vn_lap'], v_sym, 'force',
@@ -313,7 +312,7 @@ def build(ck: dict) -> list:
                                          mirrors={'ratio': {'path': 'flexure_dcr_governing', 'digits': 4}}
                                          if h['mv'] >= max(lo['dcr'], (fx.get('dist') or {}).get('dcr') or 0)
                                          else None,
-                                         **({} if htw is None else {'governing_member': htw['governing_member']})))
+                                         **({} if htw is None else _h2_two_extra(htw))))
         elif fx.get('h2_missing'):
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
                                      reason=_nt('lap.reason.section_shear_strength_vn')))
@@ -337,11 +336,14 @@ _NEEDS = {
 }
 
 
-def _share_src(ck):
-    tw = ck.get('two') or {}
-    if tw.get('Ixx') and tw.get('Ixx_2'):
-        return src('user_input', key='Ixx, Ixx_2', note=_nt('lap.note.share_from_ixx'))
-    return src('specification', note=_nt('lap.note.share_same_members'))
+def _h2_two_extra(htw):
+    """결정 S3′: 두 부재 랩의 H2 — 판정은 두 부재 강도의 합, 강성 몫으로 본 부재마다의 H2(큰 쪽)는 참고."""
+    out = {'strength_basis': 'sum_of_strengths'}
+    st = htw.get('stiffness')
+    if st:
+        out['reference_stiffness_share'] = {'ratio': st['ratio'], 'governing_member': st['governing_member'],
+                                            'shares': st['shares'], 'basis': _nt('lap.label.stiffness_share_reference')}
+    return out
 
 
 def apply_missing_demands(checks, missing, zero_unstated, demand_positive=True):
