@@ -1220,8 +1220,22 @@
             // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게)로 판정함을 밝혔을 때만
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-force-model-confirmed'))?.checked) { data.lap_force_model_confirmed = true; }
             // 결정 S1 · S5: 그 랩이 두 단면을 이으면 두 부재(호스트 본문과 같은 함수)
-            globalThis.StcfsdUtils.applyLapTwoMembers(data, globalThis.StcfsdUtils.lapTwoMembers(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated }));
+            var _two = globalThis.StcfsdUtils.lapTwoMembers(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated });
+            // 검증 2026-11-28 의 3: 경간마다 단면의 퍼린 결과가 없으면 두 부재를 단면 목록에서(t · 깊이 — 호스트 lapSectionFor 와 같은 함수). 지점이 없고 경간의 단면이 다르면 막는다
+            var _lapListErr = null;
+            if (!_two) {
+                const ds = globalThis.StcfsdDesignState;
+                const ss = [];
+                document.querySelectorAll('.span-tbl-sec').forEach((el) => { ss.push(/** @type {HTMLSelectElement} */ (el).value || 'S1'); });
+                const tplEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('select-template'));
+                const fl = globalThis.StcfsdUtils.lapMembersFromSections(ss, ds ? ds.collectSections(document, fromDisplay) : [],
+                    { template: tplEl ? tplEl.value : '', H: _optNum('tpl-H', 'length'), B: _optNum('tpl-B', 'length'), t: _optNum('tpl-t', 'thickness') },
+                    Number.isInteger(lapSup) ? lapSup : null);
+                if (fl && fl.error) { _lapListErr = fl.error; } else if (fl) { _two = fl; }
+            }
+            globalThis.StcfsdUtils.applyLapTwoMembers(data, _two);
             if (_blockIfMissing('Lap 접합부')) { return; }
+            if (_lapListErr) { setStatus('Lap 접합부: ' + _lapListErr, 'error'); return; }
             vscode.postMessage({ command: 'runLapConnection', data });
         });
     }

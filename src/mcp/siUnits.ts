@@ -688,6 +688,9 @@ export const SI_OUT_PURLIN: Table = {
         spans: 'none',
     },
     span_map: SI_OUT_LOADS,
+    // 검증 2026-11-28 의 1 · 7: 단면이 바뀌는 지점의 §G5 · §H3 단면마다, 맨 위 단면 값의 단면 id
+    support_sections_checked: { support: 'none', x_ft: 'length_ft', sections: 'none', sections_checked: { ratio: 'none' } },
+    top_level_section_id: 'none',
     ...SI_OUT_MEMBER,
 };
 

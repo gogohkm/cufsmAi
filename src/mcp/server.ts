@@ -273,7 +273,9 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
         const d = (detail as Detail) || 'summary';
         return d === 'full' ? shape(v, d) : dropUnrounded(shape(v, d));
     };
-    if (units !== 'SI' || !table) { return json(done({ ...sh(r), units: 'US' })); }
+    // 검증 2026-11-28 의 6(b): 퍼린 요약의 예산 — 넘을 때만 정해진 차례로 줄인다(budgetPurlinSummary)
+    const budget = (o: any, src: any) => (shape === shapePurlin && (detail || 'summary') === 'summary' && !o?.error ? budgetPurlinSummary(o, src) : o);
+    if (units !== 'SI' || !table) { return json(budget(done({ ...sh(r), units: 'US' }), r)); }
     const held = r.__case_replaced;
     const heldUsed = r.__case_used;
     const { __case_replaced: _h, __case_used: _hu, ...forTable } = r;
@@ -303,7 +305,7 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
         out.si_unconverted_note = 'These numeric fields have no known unit in the conversion table and were left '
             + 'exactly as the engine returned them (US). Do not read them as SI.';
     }
-    return json(out);
+    return json(budget(out, value));
 }
 
 async function postTool(tool: string, action: string, args: Record<string, any>,
@@ -807,7 +809,9 @@ function shapePurlin(r: any, detail: Detail): any {
     const skip = new Set(['regions', 'design_positive', 'design_negative', 'design_lap', 'design_uplift', 'load_analysis',
         'dsm_positive', 'dsm_negative', 'props', 'cutwp', 'sections', 'span_map']);
     const out = topLevel(r, skip, omitted);
-    for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(k); } }
+    // 검증 2026-11-28 의 7: 경간마다 단면이면 맨 위 단면 값(props · cutwp · dsm_*)은 top_level_section_id 의 단면 하나의 것
+    const topId = typeof r.top_level_section_id === 'string' ? r.top_level_section_id : null;
+    for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(topId ? `${k} (of section ${topId})` : k); } }
     // K4b: §I6.2.1 조건 — 요약에는 id · 판정 · 값 · 한계만(엔진이 조건마다 limits · 단위 · as_length 를 더해 이름표 목록 checks 와 같은 것을
     // 두 번 싣게 됐다 — 38 구간 요약이 예산을 넘은 까닭). 이름표 글은 detail 'checks' · 'full' 에.
     if (detail === 'summary' && out.i621_check && typeof out.i621_check === 'object' && Array.isArray(out.i621_check.conditions)) {
@@ -879,7 +883,7 @@ function shapePurlin(r: any, detail: Detail): any {
     for (const k of Array.isArray(r.sections) ? [] : ['dsm_positive', 'dsm_negative']) {
         if (r[k] && typeof r[k] === 'object') { out[k] = topLevel(r[k], new Set(), omitted, `${k}.`); }
     }
-    if (Array.isArray(r.sections)) { omitted.push("dsm_positive / dsm_negative (the model's values — sections[].dsm_pos / dsm_neg carry Mcrl · Lcrl · Mcrd · Lcrd of every section; detail:'full')"); }
+    if (Array.isArray(r.sections)) { omitted.push(`dsm_positive / dsm_negative (the values of section ${topId ?? 'S1'} — top_level_section_id; sections[].dsm_pos / dsm_neg carry Mcrl · Lcrl · Mcrd · Lcrd of every section; detail:'full')`); }
     // 결정 S1 · S8: 단면마다 — 치수 · 주요 성질 · 좌굴값(Mcrl · Mcrd · 반파장) · 데크 강성 · 경간. 서명곡선 · 성질 전부는 detail:'full'
     if (Array.isArray(r.sections)) {
         const dsmLine = (d: any) => (d && typeof d === 'object' ? { Mcrl: d.Mxxcrl ?? null, Lcrl: d.Lcrl ?? null, Mcrd: d.Mxxcrd ?? null, Lcrd: d.Lcrd ?? null } : null);
@@ -912,6 +916,36 @@ function shapePurlin(r: any, detail: Detail): any {
         + "get_design_check {scope:'purlin', id, location:{region, check_point}} returns one check with its calculation steps."
         + (displayNote ? ' ' + displayNote : '');
     return out;
+}
+
+/**
+ * 검증 2026-11-28 의 6(b): 퍼린 요약의 예산(40 KiB). 넘으면 정해진 차례로 줄인다 — 합격이고 지배하지 않는 구간(전체 지배 · 종류마다의 지배가 아닌)의
+ * 줄을 가장 작은 꼴 {id, kind, span(s), section_id, ratio, pass} 로. 불합격 · 평가하지 못한 구간 · 지배 구간 · 경고 · 가정 · 범위 · 평가하지 못함의 글은
+ * 손대지 않는다. 무엇을 줄였고 어디서 얻는지 more 에. 그래도 넘으면 더 자르지 않고 more 에 그렇게 적는다. 예산 안이면 바이트 하나 바꾸지 않는다.
+ */
+const PURLIN_SUMMARY_BUDGET = 40 * 1024;
+function budgetPurlinSummary(out: any, src: any): any {
+    const size = (o: any) => Buffer.byteLength(JSON.stringify(o));
+    if (!out || typeof out !== 'object' || !Array.isArray(out.regions) || size(out) <= PURLIN_SUMMARY_BUDGET) { return out; }
+    const gov = new Set<string>([out.governing?.id, ...Object.values(out.governing_by_kind || {})].filter((x): x is string => typeof x === 'string'));
+    const srcRegions: any[] = Array.isArray(src?.regions) ? src.regions : [];
+    const short: string[] = [];
+    const regions = out.regions.map((g: any) => {
+        if (!g || typeof g !== 'object' || g.pass !== true || gov.has(g.id) || g.error
+            || (Array.isArray(g.not_evaluated) && g.not_evaluated.length) || (Array.isArray(g.failing) && g.failing.length) || g.governs_not_evaluated) { return g; }
+        const s = srcRegions.find((x) => x && x.id === g.id) || {};
+        short.push(String(g.id));
+        return { id: g.id, kind: g.kind, ...(s.span !== undefined ? { span: s.span } : {}), ...(Array.isArray(s.spans) ? { spans: s.spans } : {}),
+            ...(g.section_id !== undefined ? { section_id: g.section_id } : {}), ratio: g.ratio ?? null, pass: g.pass };
+    });
+    if (!short.length) {
+        return { ...out, more: `${out.more} The summary is ${size(out)} B, over the ${PURLIN_SUMMARY_BUDGET} B budget, and has no passing non-governing region line to shorten — nothing was cut; use detail:'checks' or get_design_check for the parts you need.` };
+    }
+    const res = { ...out, regions };
+    res.more = `${out.more} Over the ${PURLIN_SUMMARY_BUDGET} B summary budget: the lines of the passing, non-governing regions ${short.join(', ')} were shortened to {id, kind, span(s), section_id, ratio, pass} (fail, not-evaluated and governing regions and every warning / assumption / scope / not-evaluated text are kept) — their bounds, demands, Ly, Cb, check points, governing check and lap members are in detail:'checks' (every region) or get_design_check {scope:'purlin', id, location:{region}}.`;
+    const n = size(res);
+    if (n > PURLIN_SUMMARY_BUDGET) { res.more += ` Still ${n} B after that (over the budget) — nothing else was cut.`; }
+    return res;
 }
 
 /** 큰 수 배열(도표 · 포락선 · 모드 형상 · 곡면 점)을 뺀다. keep 의 키는 그대로. 뺀 경로는 omitted 로. */
@@ -954,9 +988,54 @@ function shapeData(keep: string[], note: string): Shaper {
 
 const shapeLoadsArrays = shapeData([], 'Every named location (supports, lap ends, maxima, inflection points) with its Mu / Vu / reactions, the reaction envelopes per support, the unbraced regions (auto_params) and the deflections per span are kept.');
 
+/**
+ * 검증 2026-11-28 의 6(a): 경간마다 단면의 하중 해석 — 요약에는 경간마다 짧은 줄(auto_params.i621_by_span: 경간 · 단면 · R, R 이 없는 경간은
+ * 맞지 않는 조건의 id · deck_by_span: 경간 · 단면 · kφ · kx). 맞지 않는 조건의 글은 한 번(i621_failed_conditions). 경간마다의 §I6.2.1 검토 전부 ·
+ * 데크 블록 전부는 detail:'full'. 경간마다 단면이 아니면(그 키가 없다) 아무것도 바꾸지 않는다.
+ */
+function compactSpanBlocks(out: any): void {
+    const ap = out.auto_params;
+    if (!ap || typeof ap !== 'object') { return; }
+    const done: string[] = [];
+    if (Array.isArray(ap.i621_by_span)) {
+        const texts: Record<string, string> = {};
+        const reasons: string[] = [];
+        ap.i621_by_span = ap.i621_by_span.map((b: any) => {
+            if (!b || typeof b !== 'object') { return b; }
+            const row: any = { span: b.span, section_id: b.section_id ?? null, R: b.R ?? null };
+            if (b.real_span === false) { row.real_span = false; }
+            if ((b.R === null || b.R === undefined) && b.real_span !== false) {
+                const conds: any[] = Array.isArray(b.check?.conditions) ? b.check.conditions : [];
+                const bad = conds.filter((c) => c && c.status !== 'pass' && c.status !== 'not_applicable' && c.status !== 'na');
+                if (bad.length) {
+                    row.failing = bad.map((c) => c.id);
+                    for (const c of bad) { if (texts[c.id] === undefined) { texts[c.id] = typeof c.label === 'string' ? c.label : String(c.id); } }
+                } else if (Array.isArray(b.check?.reasons)) {
+                    for (const t of b.check.reasons) { const s = typeof t === 'string' ? t : (t && typeof t.text === 'string' ? t.text : JSON.stringify(t)); if (!reasons.includes(s)) { reasons.push(s); } }
+                    row.failing = [];
+                }
+            }
+            return row;
+        });
+        if (Object.keys(texts).length) { ap.i621_failed_conditions = texts; }
+        if (reasons.length) { ap.i621_reasons = reasons; }
+        done.push('auto_params.i621_by_span (each span: span, section_id, R; a span without R lists its failing condition ids — their texts once in i621_failed_conditions)');
+    }
+    if (Array.isArray(ap.deck_by_span)) {
+        ap.deck_by_span = ap.deck_by_span.map((d: any) => (d && typeof d === 'object' ? { span: d.span, section_id: d.section_id ?? null, kphi: d.kphi ?? null, kx: d.kx ?? null } : d));
+        done.push('auto_params.deck_by_span (each span: span, section_id, kphi, kx)');
+    }
+    if (done.length) {
+        const note = `Shortened per span: ${done.join('; ')}. Each span's full §I6.2.1 check and deck block (methods, notes, assumptions) are in detail:'full'.`;
+        out.detail = 'summary';
+        out.more = typeof out.more === 'string' && out.more ? `${out.more} ${note}` : note;
+    }
+}
+
 /** 하중 해석의 요약: 긴 수 배열을 빼고, 지배 조합(governing)이 중력 · 양력 결과와 같으면 그 이름만. */
 function shapeLoads(r: any, detail: Detail): any {
     const out = shapeLoadsArrays(r, detail);
+    if (detail !== 'full' && out && typeof out === 'object') { compactSpanBlocks(out); }
     if (detail === 'full' || !out || typeof out !== 'object' || !out.governing) { return out; }
     for (const k of ['gravity', 'uplift']) {
         if (out[k] && JSON.stringify(out[k]) === JSON.stringify(out.governing)) {
@@ -1200,7 +1279,7 @@ server.tool("set_case_inputs",
             id: z.string().regex(/^S([2-9]|[1-9][0-9])$/).describe("'S2' … 'S99' (S1 is the current model — not listed)"),
             name: z.string().max(40).nullable().optional(),
             template: z.string().max(20).describe("The model's template type (set_section_template) — the section list takes that type only"),
-            params: z.record(z.string(), z.number().nullable()).describe("Template dimensions {H, B, D, t, r, qlip} — in (mm if units='SI'), qlip in degrees; null = blank"),
+            params: z.record(z.string(), z.number().nullable()).describe("Template dimensions {H, B, D, t, r, qlip} — in (mm if units='SI'), qlip in degrees; a dimension left out (or null) takes S1's (the model's) value — stored and stated in the reply's assumptions; refused if S1 has none"),
         })).max(20).optional().describe("The whole section list S2 … (written whole: the list you pass replaces the case's list; spans that used a removed section go back to S1). Same template type as the model; a hand-drawn / edited model cannot have one."),
         units: CASE_UNITS,
         reason: z.string().max(20000).optional().describe("Short reason — recorded with the invalidated results and with the change (the first 300 characters, control characters removed; same rule as every write tool)"),
@@ -2197,8 +2276,8 @@ const LOAD_FIELDS = {
         t: z.number().positive().optional().describe("Thickness — in, or mm"),
         r: z.number().nonnegative().optional().describe("Inside corner radius — in, or mm"),
         qlip: z.number().gt(0).max(180).optional().describe("Lip angle — degrees"),
-    }).passthrough()).max(20).optional().describe("Additional sections S2 … of the section list (S1 = the CURRENT MODEL — not listed): the template dimensions of the same template type as the model (set_section_template). Taken whole — the list you pass replaces the case's list (spans that used a removed section go back to S1). A hand-drawn / edited model cannot have a section list. Each section gets its own properties, deck stiffness (kφ, kx), §I6.2.1 R and S-S signature-curve buckling values."),
-    span_sections: z.array(z.string().max(4)).max(50).optional().describe("Section of EACH span: 'S1' = the current model, 'S2' … from sections (or the case's list), e.g. ['S1','S2','S2','S1'] for thicker end spans. Taken whole; it belongs to the span table — a call that gives spans / supports / laps without span_sections puts every span back to S1. Each region is checked with the section of the span holding its maximum moment; a lap joining two sections shares M and V by stiffness, M_i = M · I_i / (I_1 + I_2), checks each member with its own section (the region verdict is the governing member's; the Design Manual's sum of strengths is reported as a reference only) and is NOT EVALUATED when the two depths differ; a region crossing a support where the section changes without a lap is checked with each of those sections (governing one decides). Omit → the screen's assignment."),
+    }).passthrough()).max(20).optional().describe("Additional sections S2 … of the section list (S1 = the CURRENT MODEL — not listed): the template dimensions of the same template type as the model (set_section_template). Taken whole — the list you pass replaces the case's list (spans that used a removed section go back to S1). A hand-drawn / edited model cannot have a section list. A dimension you leave out takes S1's (the model's) value — stored with the section and stated in assumptions (e.g. [{t: 0.085}] = S1 but thicker); if S1 has no value for it the call is refused, naming the section and the dimension. Each section gets its own properties, deck stiffness (kφ, kx), §I6.2.1 R and S-S signature-curve buckling values."),
+    span_sections: z.array(z.string().max(4)).max(50).optional().describe("Section of EACH span: 'S1' = the current model, 'S2' … from sections (or the case's list), e.g. ['S1','S2','S2','S1'] for thicker end spans. Taken whole; it belongs to the span table — a call that gives spans / supports / laps without span_sections puts every span back to S1 (the reply's assumptions say so when the case has a section list). Each region is checked with the section of the span holding its maximum moment; a lap joining two sections shares M and V by stiffness, M_i = M · I_i / (I_1 + I_2), checks each member with its own section (the region verdict is the governing member's; the Design Manual's sum of strengths is reported as a reference only) and is NOT EVALUATED when the two depths differ; a region crossing a support where the section changes without a lap is checked with each of those sections (governing one decides), and web crippling (§G5) / §H3 at such a support with each section bearing there (support_sections_checked). Omit → the screen's assignment."),
 };
 
 const LOADS_SECTION_STRENGTH = {

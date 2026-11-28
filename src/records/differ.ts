@@ -185,8 +185,10 @@ export function diffSnapshots(before: Snapshot, after: Snapshot, fieldInfo: Fiel
     const SEC_ID = /^S[1-9][0-9]?$/;
     const ss0: unknown[] = Array.isArray(s0.spanSections) ? s0.spanSections : sp0.map(() => 'S1');
     const ss1: unknown[] = Array.isArray(s1.spanSections) ? s1.spanSections : sp1.map(() => 'S1');
+    // 없는 자리(경간 수가 바뀐 쪽)도 S1 — 단면 목록이 없는 처음 길의 기록은 이 기능 전과 같은 필드만 낸다(경간 수를 바꿔도 「경간 n 단면」 이 생기지 않는다)
     for (let i = 0; i < Math.max(ss0.length, ss1.length); i += 1) {
-        if (!same(ss0[i] ?? null, ss1[i] ?? null)) { push({ path: `case.spans.spanSections[${i}]`, group: 'member', unit: null, from: ss0[i] ?? null, to: ss1[i] ?? null }); }
+        const a = ss0[i] ?? 'S1', b = ss1[i] ?? 'S1';
+        if (!same(a, b)) { push({ path: `case.spans.spanSections[${i}]`, group: 'member', unit: null, from: a, to: b }); }
     }
     const se0: any[] = Array.isArray(c0.sections) ? c0.sections : [], se1: any[] = Array.isArray(c1.sections) ? c1.sections : [];
     const secIds = [...new Set([...se0, ...se1].map((x) => x && x.id).filter((x) => typeof x === 'string' && SEC_ID.test(x)))];

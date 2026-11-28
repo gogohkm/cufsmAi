@@ -354,12 +354,14 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
     // 2026-11-28 결정 S1 · S5: 경간마다 단면인 퍼린 결과의 그 지점 랩이 두 단면을 이으면 두 부재(부재 1 = 왼쪽 경간, 부재 2 = 오른쪽) — 화면과 같은 함수.
     // 두 부재가 모두 S1 이면 본문은 지금까지와 같다
     UTILS.applyLapTwoMembers(data, sec.two ?? null);
+    // 검증 2026-11-28 의 3: 경간의 단면이 다르고 퍼린 결과도 랩 지점도 없으면 막는다(그 까닭 — 화면과 같은 글)
+    if (sec.list_error) { return { missing: [], error: sec.list_error }; }
     return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 
 /** V8-01: 랩 검토의 단면 강도(그 지점의 랩 구간에서) — 호스트가 결과에 출처를 적을 때도 같은 것을 부른다 */
 export function lapSectionFor(st: CaseState, ctx: RequestContext): { Se: number | null; Vn: number | null; from: string | null; regions: string[]; support: number | null; reason: string | null;
-    support_defaulted?: boolean; two?: any } {
+    support_defaulted?: boolean; support_choice?: any; two?: any; list_error?: string } {
     const sup = st.inputs.connLapSupport;
     let support = typeof sup === 'number' && Number.isInteger(sup) ? sup : null;
     // 결정 S1: 경간마다 단면인 퍼린 결과에서 지점을 정하지 않았으면 그 결과의 지배 랩(그 밖의 결과는 지금까지처럼 지점이 있어야 한다)
@@ -367,8 +369,23 @@ export function lapSectionFor(st: CaseState, ctx: RequestContext): { Se: number 
     if (support === null) { const g = UTILS.governingLapSupport(ctx.purlin ?? null); if (g !== null) { support = g; defaulted = true; } }
     const stated = st.inputs.lapRestrained === true;
     const r = UTILS.deriveLapSection(ctx.purlin ?? null, support, { stated });
-    const two = UTILS.lapTwoMembers(ctx.purlin ?? null, support, { stated });
-    return { ...r, ...(defaulted ? { support_defaulted: true } : {}), ...(two ? { two } : {}) };
+    let two = UTILS.lapTwoMembers(ctx.purlin ?? null, support, { stated });
+    // 검증 2026-11-28 의 3: 경간마다 단면의 퍼린 결과가 없으면(그 결과에 그 지점 랩이 없어도) 두 부재를 검토 상태의 단면 목록에서(t · 깊이만) —
+    // 지점이 없고 경간의 단면이 다르면 거절(모두 S1 인 것처럼 설계하지 않는다). 화면과 같은 함수(utils.lapMembersFromSections)
+    let listError: string | undefined;
+    if (!two) {
+        const fl = UTILS.lapMembersFromSections(st.spans.spanSections, st.sections, lapS1Dims(ctx), support);
+        if (fl && fl.error) { listError = fl.error; } else if (fl) { two = fl; }
+    }
+    const choice = defaulted ? UTILS.governingLapChoice(ctx.purlin ?? null) : null;
+    return { ...r, ...(defaulted ? { support_defaulted: true, support_choice: choice } : {}), ...(two ? { two } : {}), ...(listError ? { list_error: listError } : {}) };
+}
+
+/** 검증 2026-11-28 의 3: S1(모델)의 템플릿 · 치수(화면의 템플릿 칸 — US) — 단면 목록에서 랩의 두 부재를 지을 때 */
+function lapS1Dims(ctx: RequestContext): { template: string; H?: number; B?: number; t?: number } {
+    const d = ctx.drafts || {};
+    const n = (v: unknown): number | undefined => (typeof v === 'number' && isFinite(v) ? v : undefined);
+    return { template: String(d.templateType ?? ''), H: n(d.tplH), B: n(d.tplB), t: n(d.tplT) };
 }
 
 /** 단일 접합(runConnection → design_connection) — app.js btn-run-single-conn 그대로 */

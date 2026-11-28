@@ -23,6 +23,10 @@ export interface McpWrite {
     sections?: SectionDef[];
     /** 결정 S1: 경간의 단면 — span_sections 만 받았을 때(경간 표를 함께 받으면 그 표의 spanSections) */
     spanSections?: string[];
+    /** 검증 2026-11-28 의 2: 주지 않아 S1 의 값으로 채운 치수(단면마다 — 답의 알림) */
+    sectionsFilled?: Array<{ id: string | null; dims: Record<string, number> }>;
+    /** 검증 2026-11-28 의 4: 경간 표를 span_sections 없이 받아 모든 경간을 S1 로 둠(단면 목록이 있을 때 — 답의 알림) */
+    spanSectionsReset?: boolean;
     /** 화면 칸이 없는 인자 — mcpOnly[tool] 를 이것으로 바꾸고, 그 호출의 본문에 얹는다 */
     mcpOnly: Record<string, unknown>;
     /** 계산 조건이 아닌 인자(check_location · check_combination) — 그 호출의 본문에만 얹는다(상태에 남기지 않는다) */
@@ -48,7 +52,7 @@ const CONTEXT_ARGS = new Set(['check_location', 'check_combination']);
 /** 지금 상태(경간 표의 바탕 · 하중 환산의 간격) — 없으면 처음 상태처럼 */
 type Cur = (Pick<CaseState, 'inputs' | 'spans'> & { sections?: SectionDef[] }) | null | undefined;
 /** 결정 S1: 단면 목록의 템플릿(지금 모델의 것 — 모델이 템플릿 단면이 아니면 null) */
-export interface McpWriteContext { template?: string | null }
+export interface McpWriteContext { template?: string | null; /** 검증 2026-11-28 의 2: S1(모델)의 템플릿 치수 — 주지 않은 치수를 채운다 */ params?: Record<string, unknown> | null }
 type Mapper = (args: any, w: McpWrite, cur: Cur, mctx?: McpWriteContext) => void;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) ? v : null);
@@ -342,11 +346,19 @@ function sectionArgs(a: any, w: McpWrite, used: Set<string>, cur: Cur, mctx: Mcp
             }
             // id 없는 단면: S2 부터 비어 있는 번호(받은 id 를 먼저 뺀다)
             for (const s of out) { if (s.id === undefined || s.id === null) { s.id = DS.nextSectionId(out.filter((x) => x.id)); } }
-            const errs = [...bad, ...DS.validateSections(out)];
+            // 검증 2026-11-28 의 2: 주지 않은 치수는 S1(모델의 템플릿 치수)의 값 — 채운 그대로 상태에 적고 답에 알린다. S1 에도 없으면 오류
+            const fill = DS.fillSectionDims(out, mctx?.params ?? null);
+            const errs = [...bad, ...fill.errors, ...DS.validateSections(fill.list)];
             if (errs.length) { w.skipped.push({ arg: 'sections', reason: errs.join(' · ') }); }
-            else { list = out.map((x) => DS.normalizeSection(x)); w.sections = list; }
+            else {
+                list = fill.list.map((x: any) => DS.normalizeSection(x));
+                w.sections = list;
+                if (fill.filled.length) { w.sectionsFilled = fill.filled; }
+            }
         }
     }
+    // 검증 2026-11-28 의 4: 경간 표를 묶음째 쓰면서 span_sections 를 주지 않으면 모든 경간 S1(묶음의 규칙 — 그대로) — 단면 목록이 있으면 그렇게 했다고 알린다
+    if (w.spans && a.span_sections === undefined && (list ?? cur?.sections ?? []).length > 0) { w.spanSectionsReset = true; }
     if (a.span_sections !== undefined) {
         const ids = DS.sectionIds(list ?? cur?.sections ?? []);
         const n = w.spans ? w.spans.spans.length : (cur ? cur.spans.spans.length : DS.spanCount(spanType, nSpans));

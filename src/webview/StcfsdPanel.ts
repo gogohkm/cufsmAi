@@ -3285,6 +3285,15 @@ export class StcfsdPanel implements McpPanelInterface {
             result.span_sections_used = { span_sections: [...plan.ids], sections: plan.list.map((x) => ({ id: x.id, name: x.name, template: x.template,
                 params: { ...x.params }, source: x.source, Ixx: x.props?.Ixx ?? null })) };
         }
+        // 검증 2026-11-28 의 4: 단면 목록이 있는데 모든 경간이 S1 — 목록의 단면이 쓰이지 않았다고(하중 해석만 부를 때 — 퍼린 사슬은 그 결과의 맨 위에)
+        if (!plan && options?.__plan === undefined && result && typeof result === 'object' && !result.error) {
+            const unused = this._sectionsListedUnused();
+            if (unused) {
+                const n = NOTICES.hostNotice('host.purlin.sections_listed_unused', { ids: unused }, 'warnings');
+                result.warnings = [...(Array.isArray(result.warnings) ? result.warnings : []), n.text];
+                result.notices = [...(Array.isArray(result.notices) ? result.notices : []), n];
+            }
+        }
         return result;
     }
 
@@ -3319,6 +3328,18 @@ export class StcfsdPanel implements McpPanelInterface {
         if (seq !== this._sectionInfoSeq) { return; }
         this._postMessage('sectionListInfo', { info, template: tpl });
     }
+    /**
+     * 검증 2026-11-28 의 4: 이 계산의 검토 상태(MCP 는 합친 사본, 화면은 지금 상태)에 단면 목록이 있는데 모든 경간이 S1 이면 그 id 들(「S2, S3」),
+     * 아니면 null — 결과에 「목록의 단면이 쓰이지 않음」 을 단다. 목록이 비었으면 null(이 기능이 없던 길 그대로)
+     */
+    private _sectionsListedUnused(): string | null {
+        const cs: any = this._calcCase.getStore() ?? this._caseKeeper.state;
+        const list: any[] = Array.isArray(cs?.sections) ? cs.sections : [];
+        const ss: any[] = Array.isArray(cs?.spans?.spanSections) ? cs.spans.spanSections : [];
+        if (!list.length || ss.some((x) => x !== 'S1')) { return null; }
+        return list.map((x) => String(x?.id ?? '?')).join(', ');
+    }
+
     /** 결정 S1 · S2: 모델이 단면 목록을 쓸 수 있는 템플릿 단면이면 그 템플릿 이름(직접 그린 · 고친 단면 · 원형관 → null) */
     private _modelSectionTemplate(model: any = this._model): string | null {
         const m = model as any;
@@ -3602,8 +3623,14 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         // 2026-11-28 결정 S1 · S5: 두 단면을 잇는 랩 — 부재마다의 단면 · 강도(퍼린 결과의 그 부재), 지점을 정하지 않았으면 지배 랩
         const two = sn.two && !sn.two.allS1 ? sn.two : null;
+        // 검증 2026-11-28 의 3: 퍼린 결과가 없어 두 부재를 단면 목록에서(t · 깊이만 — Se · Vn · Ix 는 퍼린 실행만이 준다)
+        const twoCode = two && two.from_list ? 'host.lap.members_from_list' : 'host.lap.two_sections';
+        const twoVals: any = !two ? {} : two.from_list
+            ? { at: two.support != null ? NOTICES.hostNotice('host.lap.at_support', { support: two.support }) : NOTICES.hostNotice('host.lap.at_any_support'),
+                s1: two.members[0].section_id, s2: two.members[1].section_id }
+            : { support: two.support, s1: two.members[0].section_id, s2: two.members[1].section_id };
         if (two) {
-            fromN = NOTICES.hostNotice('host.lap.two_sections', { support: two.support, s1: two.members[0].section_id, s2: two.members[1].section_id });
+            fromN = NOTICES.hostNotice(twoCode, twoVals);
             src = { ...src, from: fromN.text, support: two.support, regions: two.regions, reason: null,
                 members: two.members.map((m: any) => ({ section_id: m.section_id, span: m.span, d: m.d, t: m.t, Se: m.Se, Vn: m.Vn, Sf: m.Sf, Ixx: m.Ixx })),
                 same_members: two.same, depth_mismatch: two.depth_mismatch };
@@ -3615,12 +3642,21 @@ export class StcfsdPanel implements McpPanelInterface {
         if (sn.support_defaulted && (two || src.Se !== null)) { src.support_defaulted = true; }
         result.section_source = src;
         if (two) {
-            const n2 = NOTICES.hostNotice('host.lap.two_sections', { support: two.support, s1: two.members[0].section_id, s2: two.members[1].section_id }, 'assumptions');
+            const n2 = NOTICES.hostNotice(twoCode, twoVals, 'assumptions');
             result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), n2.text];
             result.notices = [...(Array.isArray(result.notices) ? result.notices : []), n2];
         }
         if (sn.support_defaulted && (two || src.Se !== null)) {
-            const nd = NOTICES.hostNotice('host.lap.governing_support', { support: two ? two.support : src.support }, 'assumptions');
+            // 검증 2026-11-28 의 9: 평가하지 못한 랩 · 양력 랩이 있으면 「평가한 중력 랩 가운데」 라고 말하고 그 랩들을 든다(고르는 규칙은 그대로)
+            const ch = sn.support_choice;
+            const lab = (g: any) => NOTICES.siblingNotice(g, 'label') || { code: null, kind: 'fragment', text: String(g?.label ?? g?.id ?? '?'), text_ko: String(g?.label ?? g?.id ?? '?') };
+            const partial = ch && (ch.not_evaluated.length || ch.uplift_laps.length);
+            const nd = partial
+                ? NOTICES.hostNotice('host.lap.governing_support_partial', { support: two ? two.support : src.support,
+                    among: NOTICES.hostNotice(ch.evaluated ? 'host.lap.among_evaluated' : 'host.lap.none_evaluated'),
+                    ne: ch.not_evaluated.length ? NOTICES.hostNotice('host.lap.laps_not_evaluated', { laps: NOTICES.group(ch.not_evaluated.map(lab), ' · ') }) : NOTICES.EMPTY_FRAGMENT,
+                    up: ch.uplift_laps.length ? NOTICES.hostNotice('host.lap.uplift_not_considered', { laps: NOTICES.group(ch.uplift_laps.map(lab), ' · ') }) : NOTICES.EMPTY_FRAGMENT }, 'assumptions')
+                : NOTICES.hostNotice('host.lap.governing_support', { support: two ? two.support : src.support }, 'assumptions');
             result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), nd.text];
             result.notices = [...(Array.isArray(result.notices) ? result.notices : []), nd];
         }
@@ -5747,12 +5783,14 @@ export class StcfsdPanel implements McpPanelInterface {
             for (const g of sec.pos.values()) { if (span !== null && g.spans.includes(span)) { return g; } }
             return [...sec.pos.values()][0];
         };
-        // 단일 단면 길의 값(지금까지의 이름 — 결과의 dsm_positive · dsm_negative)
+        // 단일 단면 길의 값(지금까지의 이름 — 결과의 dsm_positive · dsm_negative · props · cutwp).
+        // 검증 2026-11-28 의 7: 맨 위의 단면 값은 모두 한 단면의 것 — 어느 경간이 S1 을 쓰면 S1, 아니면 첫 경간의 단면(top_level_section_id 가 그 id)
         const firstSec = multi ? (ctxs.get(multi.ids[0]) as SecCtx) : S1;
-        const dsmPos = (multi ? (S1 ?? firstSec) : S1).pos.values().next().value!.dsm;
-        const dsmNeg = (multi ? (S1 ?? firstSec) : S1).dsmNeg;
-        const props = s1Props;
-        const cutwp = s1Cutwp;
+        const topSec: SecCtx = multi ? (S1 ?? firstSec) : S1;
+        const dsmPos = topSec.pos.values().next().value!.dsm;
+        const dsmNeg = topSec.dsmNeg;
+        const props = multi ? topSec.props : s1Props;
+        const cutwp = multi ? topSec.cutwp : s1Cutwp;
 
         const gravity = loadResult.gravity || loadResult.governing || null;
         const uplift = loadResult.uplift || null;
@@ -5887,6 +5925,16 @@ export class StcfsdPanel implements McpPanelInterface {
 
         // 4. 지점 반력(웹 크리플링)을 구간에 붙인다
         const supportsAt = new Map<string, any[]>();
+        /** 랩이 아닌 구간이 검토하는 단면들(그 구간에 있는 경간의 단면 — 아래 membersOf 와 같은 규칙). 단일 단면 길은 S1 */
+        const regionSecIds = (rg: Region): string[] => {
+            if (!multi) { return ['S1']; }
+            const r = rg.src || {};
+            const spans: number[] = Array.isArray(r.spans) && r.spans.length ? r.spans.filter((j: any) => Number.isInteger(j)) : (Number.isInteger(r.span) ? [r.span] : []);
+            return [...new Set(spans.map((j) => multi.ids[j]).filter((id): id is string => typeof id === 'string'))];
+        };
+        /** 검증 2026-11-28 의 1: 랩 없이 단면이 바뀌는 지점 — 지점마다 얹힌 단면과 그 단면을 검토한 구간 */
+        const supportSections: Array<{ support: number; name: string | null; x_ft: number; sections: string[]; regions: string[] }> = [];
+        const supportChecked: Array<{ support: number; section_id: string | null; region: string; pass: boolean | null; ratio: number | null; governing_check: string | null }> = [];
         const wcList: any[] = Array.isArray(loadResult.wc_reactions) ? loadResult.wc_reactions : [];
         const locs: any[] = Array.isArray(gravity?.locations) ? gravity.locations : [];
         const hasN = Number(wcOpts.wc_N) > 0;
@@ -5902,34 +5950,52 @@ export class StcfsdPanel implements McpPanelInterface {
                     notEvaluated.push(`§G5 웹 크리플링 · §H3 — 랩 안의 지점 ${wc.support} (${wc.name}): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.`);
                     continue;
                 }
-                const host = regions.filter((rg) => (rg.kind === 'negative' || rg.kind === 'positive')
+                const hosts = regions.filter((rg) => (rg.kind === 'negative' || rg.kind === 'positive')
                     && x >= un(rg.src, 'start_ft', rg.kind) - 1e-6 && x <= un(rg.src, 'end_ft', rg.kind) + 1e-6)
-                    .sort((a, b) => (a.kind === 'negative' ? -1 : 1) - (b.kind === 'negative' ? -1 : 1))[0];
+                    .sort((a, b) => (a.kind === 'negative' ? -1 : 1) - (b.kind === 'negative' ? -1 : 1));
+                const host = hosts[0];
                 if (!host) {
                     notEvaluated.push(`§G5 웹 크리플링 — 지점 ${wc.support} (${wc.name}): 지점을 품은 휨 구간이 없습니다.`);
                     continue;
                 }
-                const supLoc = locs.find((l) => l?.support === wc.support && l?.R_bearing !== undefined);
-                // 지점 M: 위치 항목의 Mu(끝 지점은 null 일 수 있음 → 포락선), V: 지점 양쪽 전단 중 큰 값(V3 T3).
-                const envAt = this._envelopeAt(gravity, x, host.neg ? '-' : '+');
-                const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(un(supLoc, 'Mu', 'locations')) * 12
-                    : (envAt ? envAt.M * 12 : undefined);
-                // V6b-01: 지점 면의 전단 — 지점이 구간 안이면 큰 면, 구간 끝이면 그 구간 쪽 면(위치 항목의 Vu_left · Vu_right)
-                const faceAt = StcfsdPanel._supportFace(gravity, wc.support, x, un(host.src, 'start_ft', host.kind), un(host.src, 'end_ft', host.kind));
-                const vSides = faceAt ? [faceAt.V] : [];
-                const vAt = vSides.length > 0 ? (faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - vSides[0]) <= 5e-4 ? envAt.V : vSides[0]) : envAt?.V;
-                const arr = supportsAt.get(host.id) || [];
-                // V6-08: 지점 위치 항목의 값이면 그 항목의 조합 · 패턴, 포락선이면 그 판단은 아래(_demandCombination)
-                const fromLoc = !!supLoc && Number.isFinite(supLoc.Mu);
-                // K3-6: 지점의 M · V · 반력 출처 — 위치 항목(combo · combo_V · combo_R)이 있으면 그것, 포락선 값이면 envelope_source
-                const envSrc = StcfsdPanel._pointSources(gravity, envAt?.i, host.neg ? '-' : '+');
-                const srcM = fromLoc ? StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) : envSrc.m;
-                const gridIsFace = !!(faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4);
-                const srcV = gridIsFace ? envSrc.v : faceAt ? (faceAt.combo ?? `envelope (지점 ${wc.support} ${faceAt.side === 'left' ? '왼쪽' : '오른쪽'} 면 — 하중 해석이 그 면의 조합을 주지 않음)`) : envSrc.v;
-                const srcR = supLoc ? StcfsdPanel._comboLabel(supLoc.combo_R, supLoc.pattern_R) : null;
-                arr.push({ ...wc, x_ft: x, __Pu: un(wc, 'Pu', 'wc_reactions'), M_kipin: mAt, V_kips: vAt, __combo: fromLoc ? (StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) ?? 'envelope') : undefined,
-                    __envI: envAt?.i, __src: { m: srcM, v: vAt !== undefined ? srcV : null, r: srcR } });
-                supportsAt.set(host.id, arr);
+                // 검증 2026-11-28 의 1: 경간마다 단면이면 지점에 얹힌 단면마다(랩이 없는 지점 — 그 지점에서 만나는 두 경간의 단면) §G5 · §H3 을 본다.
+                // 첫 구간(지금까지의 자리)이 품지 않은 단면은 그 단면을 쓰는 다른 구간(그 지점을 품은)에 붙인다 — 그런 구간이 없으면 평가하지 못함
+                const hostList: Region[] = [host];
+                if (multi) {
+                    const sNo = Number(wc.support);
+                    const bearing = Number.isInteger(sNo) ? [...new Set([multi.ids[sNo - 2], multi.ids[sNo - 1]].filter((id): id is string => typeof id === 'string'))] : [];
+                    const covered = new Set(regionSecIds(host));
+                    for (const id of bearing) {
+                        if (covered.has(id)) { continue; }
+                        const other = hosts.find((rg) => rg !== host && regionSecIds(rg).includes(id));
+                        if (other) { hostList.push(other); regionSecIds(other).forEach((y) => covered.add(y)); }
+                        else { notEvaluated.push(H('host.purlin.support_section_unchecked', { support: Number(wc.support), section: id })); }
+                    }
+                    if (bearing.length > 1) { supportSections.push({ support: Number(wc.support), name: wc.name ?? null, x_ft: x, sections: bearing, regions: hostList.map((rg) => rg.id) }); }
+                }
+                for (const host of hostList) {
+                    const supLoc = locs.find((l) => l?.support === wc.support && l?.R_bearing !== undefined);
+                    // 지점 M: 위치 항목의 Mu(끝 지점은 null 일 수 있음 → 포락선), V: 지점 양쪽 전단 중 큰 값(V3 T3).
+                    const envAt = this._envelopeAt(gravity, x, host.neg ? '-' : '+');
+                    const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(un(supLoc, 'Mu', 'locations')) * 12
+                        : (envAt ? envAt.M * 12 : undefined);
+                    // V6b-01: 지점 면의 전단 — 지점이 구간 안이면 큰 면, 구간 끝이면 그 구간 쪽 면(위치 항목의 Vu_left · Vu_right)
+                    const faceAt = StcfsdPanel._supportFace(gravity, wc.support, x, un(host.src, 'start_ft', host.kind), un(host.src, 'end_ft', host.kind));
+                    const vSides = faceAt ? [faceAt.V] : [];
+                    const vAt = vSides.length > 0 ? (faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - vSides[0]) <= 5e-4 ? envAt.V : vSides[0]) : envAt?.V;
+                    const arr = supportsAt.get(host.id) || [];
+                    // V6-08: 지점 위치 항목의 값이면 그 항목의 조합 · 패턴, 포락선이면 그 판단은 아래(_demandCombination)
+                    const fromLoc = !!supLoc && Number.isFinite(supLoc.Mu);
+                    // K3-6: 지점의 M · V · 반력 출처 — 위치 항목(combo · combo_V · combo_R)이 있으면 그것, 포락선 값이면 envelope_source
+                    const envSrc = StcfsdPanel._pointSources(gravity, envAt?.i, host.neg ? '-' : '+');
+                    const srcM = fromLoc ? StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) : envSrc.m;
+                    const gridIsFace = !!(faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4);
+                    const srcV = gridIsFace ? envSrc.v : faceAt ? (faceAt.combo ?? `envelope (지점 ${wc.support} ${faceAt.side === 'left' ? '왼쪽' : '오른쪽'} 면 — 하중 해석이 그 면의 조합을 주지 않음)`) : envSrc.v;
+                    const srcR = supLoc ? StcfsdPanel._comboLabel(supLoc.combo_R, supLoc.pattern_R) : null;
+                    arr.push({ ...wc, x_ft: x, __Pu: un(wc, 'Pu', 'wc_reactions'), M_kipin: mAt, V_kips: vAt, __combo: fromLoc ? (StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) ?? 'envelope') : undefined,
+                        __envI: envAt?.i, __src: { m: srcM, v: vAt !== undefined ? srcV : null, r: srcR } });
+                    supportsAt.set(host.id, arr);
+                }
             }
         }
 
@@ -6170,6 +6236,18 @@ export class StcfsdPanel implements McpPanelInterface {
                 return (Number(b.r.result?.utilization) || 0) - (Number(a.r.result?.utilization) || 0);
             })[0];
             const allResults = perMember.flatMap((x) => x.r.results);
+            // 검증 2026-11-28 의 1: 단면이 바뀌는 지점의 §G5 · §H3 — 단면마다 그 지점 검토(지배 부재가 아닌 부재의 것도)
+            for (const ss of supportSections) {
+                if (!ss.regions.includes(rg.id)) { continue; }
+                for (const x of allResults) {
+                    if (x?.check_point !== `support ${ss.support}`) { continue; }
+                    const wcs = (Array.isArray(x.design_checks) ? x.design_checks : []).filter((c: any) => c && /web_crippling/.test(String(c.id)));
+                    const pass = StcfsdPanel._combinePass(wcs.length ? wcs.map((c: any) => (c.verdict === 'pass' ? true : c.verdict === 'fail' ? false : null)) : [null]);
+                    const worst = wcs.reduce((a: any, c: any) => (a && Number(a.ratio) >= Number(c.ratio) ? a : c), null);
+                    supportChecked.push({ support: ss.support, section_id: x.__location?.section_id ?? null, region: rg.id, pass: x.error ? null : pass,
+                        ratio: worst && Number.isFinite(Number(worst.ratio)) ? Number(worst.ratio) : null, governing_check: worst?.id ?? null });
+                }
+            }
             const regionPass = StcfsdPanel._combinePass(perMember.map((x) => x.r.regionPass));
             const notEvalRegion = Array.from(new Set(perMember.flatMap((x) => x.r.notEvalRegion)));
             const result: any = perMember.length === 1 ? gov.r.result : { ...gov.r.result, pass: regionPass, not_evaluated: notEvalRegion };
@@ -6239,6 +6317,11 @@ export class StcfsdPanel implements McpPanelInterface {
         if (multi) {
             assumptions.push(H('host.purlin.sections_per_span', { map: multi.ids.map((id, i) => `${i + 1}: ${id}`).join(', ') }));
             for (const x of sectionRuleRegions) { assumptions.push(H('host.purlin.section_change_rule', { region: x.rg.labelNotice, sections: x.ids.join(' | ') })); }
+            for (const x of supportSections) { assumptions.push(H('host.purlin.support_section_change', { support: x.support, sections: x.sections.join(' | ') })); }
+        } else {
+            // 검증 2026-11-28 의 4: 단면 목록이 있는데 모든 경간이 S1 — 목록의 단면은 이 결과에 쓰이지 않았다(목록이 비었으면 아무것도 — 처음 길 그대로)
+            const unused = this._sectionsListedUnused();
+            if (unused) { warnings.push(H('host.purlin.sections_listed_unused', { ids: unused })); }
         }
         assumptions.push(H('host.purlin.vu_envelope'));
         // 검증 2026-11-25 의 1: 서명곡선은 구속하지 않고 풀었다(_signatureDsm) — 모델의 모드 구속은 보기만의 것
@@ -6312,6 +6395,18 @@ export class StcfsdPanel implements McpPanelInterface {
         if (multi) {
             // 결정 S1 · S8: 단면마다의 블록(검토 화면이 단면을 골라 본다 — 성질 · 좌굴값 · 서명곡선. 곡선은 MCP 요약에 싣지 않는다)과 경간 → 단면
             result.span_sections = [...multi.ids];
+            // 검증 2026-11-28 의 7: 맨 위 props · cutwp · dsm_positive · dsm_negative 가 어느 단면의 것인지
+            result.top_level_section_id = topSec.id;
+            // 검증 2026-11-28 의 1: 랩 없이 단면이 바뀌는 지점마다 §G5 · §H3 을 검토한 단면(불합격 → 평가하지 못함 → 합격)
+            if (supportSections.length) {
+                result.support_sections_checked = supportSections.map((s) => {
+                    const lines = supportChecked.filter((c) => c.support === s.support).map(({ support: _s, ...c }) => { void _s; return c; });
+                    const missing = s.sections.filter((id) => !lines.some((c) => c.section_id === id));
+                    return { support: s.support, name: s.name, x_ft: s.x_ft, sections: [...s.sections],
+                        pass: StcfsdPanel._combinePass([...lines.map((c) => c.pass), ...missing.map(() => null)]),
+                        sections_checked: lines, ...(missing.length ? { sections_not_checked: missing } : {}), section_rule: 'section_change_at_support' };
+                });
+            }
             result.sections = [...ctxs.values()].map((c) => StcfsdPanel._sectionBlock(c, ap, fy));
             if (ap.span_map) { result.span_map = ap.span_map; }
         }
@@ -6553,7 +6648,7 @@ export class StcfsdPanel implements McpPanelInterface {
      */
     private async _mcpDesign(options: any): Promise<any> {
         const k = this._caseKeeper;
-        const w = mcpWrite(options.action, options, k.state, { template: this._modelSectionTemplate() }) as McpWrite;
+        const w = mcpWrite(options.action, options, k.state, { template: this._modelSectionTemplate(), params: (this._model as any)?.sectionParams ?? null }) as McpWrite;
         const run = StcfsdPanel.MCP_DESIGN_RUN[w.tool];
         // 상태에 쓰지 못한 인자가 있으면 계산하지 않는다 — 그 칸은 화면의 값이 되어 AI 가 준 조건과 다른 것을 계산하게 된다
         const lost = w.skipped.filter((s) => !s.carried);
@@ -6613,7 +6708,26 @@ export class StcfsdPanel implements McpPanelInterface {
             this._postCaseState('ai');
             this._postCaseDirty(false);
         }
-        return { ...r, ...extra };
+        // 검증 2026-11-28 의 2 · 4: S1 의 값으로 채운 단면 치수, span_sections 없이 경간 표를 받아 모든 경간을 S1 로 둠 — 이 호출의 답에(결과 사본의 가정 끝에)
+        const told = StcfsdPanel._sectionDimsNotices(w.sectionsFilled, 'assumptions');
+        if (w.spanSectionsReset) {
+            const ids = (w.sections ?? preview.state.sections ?? []).map((x: any) => x.id).join(', ');
+            told.push(NOTICES.hostNotice('host.case.span_sections_reset', { ids }, 'assumptions'));
+        }
+        return { ...StcfsdPanel._withNotices(r, 'assumptions', told), ...extra };
+    }
+
+    /** 검증 2026-11-28 의 2: S1 의 값으로 채운 단면 치수의 알림(단면마다 하나 — 치수는 부른 쪽의 단위로 그려진다) */
+    private static _sectionDimsNotices(filled: Array<{ id: string | null; dims: Record<string, number> }> | undefined, list: string): any[] {
+        return (filled || []).map((f) => NOTICES.hostNotice('host.case.section_dims_from_s1', {
+            id: String(f.id ?? '?'),
+            dims: NOTICES.group(Object.entries(f.dims).map(([k, v]) => NOTICES.hostNotice(k === 'qlip' ? 'host.case.section_dim_angle' : 'host.case.section_dim_len', { name: k, v })), ', '),
+        }, list));
+    }
+    /** 답(사본)의 목록 끝에 호스트 알림을 더한다 — 목록의 글과 notices 의 차례가 같게(forReader 가 그 단위의 한국어로) */
+    private static _withNotices(r: any, list: 'assumptions' | 'warnings', ns: any[]): any {
+        if (!ns.length || !r || typeof r !== 'object') { return r; }
+        return { ...r, [list]: [...(Array.isArray(r[list]) ? r[list] : []), ...ns.map((n) => n.text)], notices: [...(Array.isArray(r.notices) ? r.notices : []), ...ns] };
     }
 
     /** 검토 상태 키의 단위 종류(응답의 SI 변환 — server.ts unitReply) */
@@ -8257,6 +8371,7 @@ ${inner}
         const given = options?.inputs && typeof options.inputs === 'object' ? options.inputs : {};
         const changes: any = {};
         const rejected: { key: string; reason: string; reason_code?: string }[] = [];
+        let dimsTold: any[] = [];
         for (const [key, v] of Object.entries(given)) {
             const m = DSm.fieldMeta(key);
             if (m && m.owner === 'model') {
@@ -8287,7 +8402,15 @@ ${inner}
             } else if (bad.length) {
                 rejected.push({ key: 'sections', reason: `section(s) ${bad.join(', ')}: the template must be the model's ('${tpl}')`, reason_code: 'host.case.sections_template' });
             } else {
-                changes.sections = si ? caseSectionsToUS(options.sections) : options.sections;
+                const us = si ? caseSectionsToUS(options.sections) : options.sections;
+                // 검증 2026-11-28 의 2: 주지 않은 치수(없음 · null)는 S1(모델)의 값 — 채운 그대로 상태에, 답에 알림. S1 에도 없으면 받지 않는다
+                const fill = list ? DSm.fillSectionDims(us, (this._model as any)?.sectionParams ?? null) : null;
+                if (fill && fill.errors.length) {
+                    rejected.push({ key: 'sections', reason: fill.errors.join(' · '), reason_code: 'host.case.section_dims_missing' });
+                } else {
+                    changes.sections = fill ? fill.list : us;
+                    if (fill) { dimsTold = StcfsdPanel._sectionDimsNotices(fill.filled, 'assumptions'); }
+                }
             }
         }
         const before = this._caseKeeper.state;
@@ -8315,10 +8438,12 @@ ${inner}
             this._postCaseState('ai');
         }
         this._postCaseDirty(false);
-        return { success: rejected.length === 0, rev: this._caseKeeper.state.rev, accepted: r.accepted, rejected,
+        const reply = { success: rejected.length === 0, rev: this._caseKeeper.state.rev, accepted: r.accepted, rejected,
             invalidated, dirty: this._caseKeeper.isDirty(this._currentModelSignature()),
             ...(replaced.length ? { case_inputs_replaced: replaced,
                 case_note: 'These inputs were set by the person (or read from a file / the load analysis) and this call replaced them — tell the person; set_case_inputs with the previous value restores one.' } : {}) };
+        // 검증 2026-11-28 의 2: S1 의 값으로 채운 단면 치수(목록을 받았을 때 — 바뀐 것이 없어도 그 치수는 S1 에서 왔다)
+        return rejected.some((x) => x.key === 'sections') ? reply : StcfsdPanel._withNotices(reply, 'assumptions', dimsTold);
     }
 
     /** 입력이 바뀌었다 — 그 칸이 무효로 만드는 결과를 지운다(설계 §8 의 표 — 무효 장부로). 지운 범위 */

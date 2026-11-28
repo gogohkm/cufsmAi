@@ -364,13 +364,25 @@
      * 경간마다 단면이 아닌 결과 · 랩 구간이 없으면 null(지금까지처럼 지점을 정해야 한다).
      */
     function governingLapSupport(purlin) {
+        const c = governingLapChoice(purlin);
+        return c ? c.support : null;
+    }
+    /**
+     * 검증 2026-11-28 의 9: 지배 랩을 고른 근거 — 고르는 규칙은 governingLapSupport 그대로(중력 랩 구간 가운데 불합격 → 큰 이용률, 평가하지 못한 랩은 뒤).
+     * 평가하지 못한 랩(판정 null)과 고르는 데 넣지 않은 양력 랩을 함께 — 알림이 「평가한 중력 랩 가운데」 라고 말하고 그 랩들을 든다.
+     * @returns {{support: number, chosen: any, evaluated: boolean, not_evaluated: any[], uplift_laps: any[]}|null}
+     */
+    function governingLapChoice(purlin) {
         if (!purlin || !Array.isArray(purlin.regions) || !Array.isArray(purlin.span_sections)) { return null; }
         const laps = purlin.regions.filter((g) => g && g.kind === 'lap' && Number.isInteger(Number(g.support)) && g.result);
         if (!laps.length) { return null; }
         const u = (g) => (typeof g.result.utilization === 'number' && isFinite(g.result.utilization) ? g.result.utilization : -1);
         const fail = laps.filter((g) => g.result.pass === false);
         const pool = (fail.length ? fail : laps).slice().sort((a, b) => u(b) - u(a));
-        return Number(pool[0].support) + 1;
+        const chosen = pool[0];
+        const uplift = purlin.regions.filter((g) => g && g.kind !== 'lap' && (g.lap === true || /^uplift_(lap|support_lap)-/.test(String(g.id))));
+        return { support: Number(chosen.support) + 1, chosen, evaluated: chosen.result.pass === true || chosen.result.pass === false,
+            not_evaluated: laps.filter((g) => g.result.pass !== true && g.result.pass !== false), uplift_laps: uplift };
     }
 
     /**
@@ -415,6 +427,57 @@
         const same = members[0].section_id === members[1].section_id;
         const dm = members[0].d !== null && members[1].d !== null && Math.abs(members[0].d - members[1].d) > 1e-6 * Math.max(members[0].d, members[1].d);
         return { support: sup, defaulted, allS1, same, depth_mismatch: dm, members, regions: withMembers.map((g) => String(g.id)) };
+    }
+
+    /**
+     * 검증 2026-11-28 의 3: 경간마다 단면의 퍼린 결과가 없을 때(또는 그 결과에 그 지점의 랩이 없을 때) 랩 접합의 두 부재를 검토 상태의 단면 목록에서 —
+     * 화면 본문(app.js 랩 단추)과 호스트 본문(requests.ts lapSectionFor)이 이 한 함수를 쓴다. 모든 경간이 S1 이면 null(지금까지의 본문 그대로).
+     * 모든 경간이 같은 단면 X 면 지점과 상관없이 X | X. 아니면 지점(1 부터)이 있어야 한다 — 부재 1 = 그 지점 왼쪽 경간, 부재 2 = 오른쪽(끝 지점은 그 경간 둘).
+     * 지점이 없으면 { error } — 모두 S1 인 것처럼 설계하지 않는다. 부재마다 d · t 만(그 단면의 템플릿 치수 — hat 은 B 가 깊이, S1 은 s1 의 치수):
+     * Se · Vn · Sf · Ix 는 퍼린 실행만이 주므로 없다(그 값을 쓰는 검토는 엔진이 「평가하지 못함」 으로).
+     * @param {string[]} spanSections  경간마다 단면 id
+     * @param {any[]} sections  단면 목록 S2 … [{id, template, params}] (US)
+     * @param {{template?: string, H?: number, B?: number, t?: number}} s1  S1(모델)의 템플릿 · 치수(US)
+     * @param {number|null} support  랩 지점(1 부터) — 없으면 null
+     */
+    function lapMembersFromSections(spanSections, sections, s1, support) {
+        const ids = Array.isArray(spanSections) ? spanSections : [];
+        if (!ids.some((x) => x !== 'S1')) { return null; }
+        const num = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+        const list = Array.isArray(sections) ? sections : [];
+        const distinct = Array.from(new Set(ids));
+        let left, right, sup = Number.isInteger(support) && support >= 1 ? support : null;
+        if (distinct.length === 1) {
+            left = { id: distinct[0], span: sup !== null && sup >= 2 && sup - 2 < ids.length ? sup - 2 : 0 };
+            right = { id: distinct[0], span: sup !== null && sup - 1 < ids.length ? sup - 1 : 0 };
+        } else {
+            if (sup === null) {
+                return { error: '경간마다 단면이 달라(' + ids.map((id, i) => (i + 1) + ': ' + id).join(', ') + ') 어느 두 부재를 잇는 랩인지 알 수 없습니다 — 랩 지점(connLapSupport)을 정하거나 퍼린 검토를 먼저 실행하십시오(모두 S1 인 것처럼 설계하지 않습니다).' };
+            }
+            const li = sup - 2, ri = sup - 1;
+            const has = (i) => i >= 0 && i < ids.length;
+            if (!has(li) && !has(ri)) { return { error: '랩 지점 ' + sup + ' 이(가) 경간 표에 없습니다(지점 1 – ' + (ids.length + 1) + ').' }; }
+            left = { id: has(li) ? ids[li] : ids[ri], span: has(li) ? li : ri };
+            right = { id: has(ri) ? ids[ri] : ids[li], span: has(ri) ? ri : li };
+        }
+        const s = s1 || {};
+        const member = (m) => {
+            if (m.id === 'S1') {
+                const hat = s.template === 'hat';
+                return { section_id: 'S1', span: m.span, d: num(hat ? s.B : s.H), t: num(s.t), Se: null, Vn: null, Sf: null, Ixx: null };
+            }
+            const sec = list.find((x) => x && x.id === m.id);
+            if (!sec) { return null; }
+            const p = sec.params || {};
+            const hat = sec.template === 'hat';
+            return { section_id: m.id, span: m.span, d: num(hat ? p.B : p.H), t: num(p.t), Se: null, Vn: null, Sf: null, Ixx: null };
+        };
+        const a = member(left), b = member(right);
+        if (!a || !b) { return { error: '경간의 단면 ' + (!a ? left.id : right.id) + ' 이(가) 단면 목록에 없습니다.' }; }
+        const members = [a, b];
+        const dm = a.d !== null && b.d !== null && Math.abs(a.d - b.d) > 1e-6 * Math.max(a.d, b.d);
+        return { support: sup, defaulted: false, from_list: true, allS1: a.section_id === 'S1' && b.section_id === 'S1', same: a.section_id === b.section_id,
+            depth_mismatch: dm, members, regions: [] };
     }
 
     /**
@@ -595,7 +658,7 @@
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason, purlinLists,
-        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure, governingLapSupport, lapTwoMembers, applyLapTwoMembers,
+        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure, governingLapSupport, governingLapChoice, lapTwoMembers, lapMembersFromSections, applyLapTwoMembers,
         boundFailure: lengthBoundFailure, failsWithoutHoles, boundFailureText, FAILS_WITHOUT_HOLES, inputErrorText,
     };
 });

@@ -763,25 +763,38 @@
                     });
                     const rBy = apS && Array.isArray(apS.uplift_R_by_span) ? apS.uplift_R_by_span : null;
                     if (rBy && la.uplift) {
-                        const some = rBy.some((v) => v != null), all = rBy.every((v) => v != null);
+                        // 검증 2026-11-28 의 8: 경간의 꼴로 §I6.2.1 이 닿지 않는 경간(내민 경간 — 엔진 i621_by_span 의 real_span false)은 R 이 없는 것이 맞다 — 경고하지 않는다
+                        const ib = Array.isArray(apS.i621_by_span) ? apS.i621_by_span : [];
+                        const notApplicable = (i) => ib.some((b) => b && Number(b.span) === i && b.real_span === false);
+                        const idx = rBy.map((_, i) => i).filter((i) => !notApplicable(i));
+                        const some = idx.some((i) => rBy[i] != null), all = idx.every((i) => rBy[i] != null);
+                        const naSpans = rBy.map((_, i) => i).filter(notApplicable);
                         checks.push({
                             category: catF, item: '양력 R 계수 — 경간마다 (§I6.2.1)',
                             status: all ? 'pass' : 'warn',
-                            value: rBy.map((v, i) => (i + 1) + ': ' + (v == null ? '—' : v)).join(', '),
+                            value: rBy.map((v, i) => (i + 1) + ': ' + (v == null ? (notApplicable(i) ? '— (해당 없음)' : '—') : v)).join(', '),
                             criterion: '경간마다 그 단면의 조건 (a)–(o) — 만족하는 경간에서만 R',
-                            note: all ? '' : (some ? 'R 이 없는 경간의 양력 하부압축 구간은 Ly 로 횡비틀림(F2) 검토.' : '어느 경간에도 R 을 쓰지 않음.'),
+                            note: (all ? '' : (some ? 'R 이 없는 경간의 양력 하부압축 구간은 Ly 로 횡비틀림(F2) 검토.' : '어느 경간에도 R 을 쓰지 않음.'))
+                                + (naSpans.length ? (all ? '' : ' ') + '내민 경간 ' + naSpans.map((i) => i + 1).join(', ') + ' 은(는) §I6.2.1 이 닿지 않는 경간(해당 없음).' : ''),
                         });
                     }
                     const laps = pd && Array.isArray(pd.purlin_regions) ? pd.purlin_regions.filter((g) => g && (g.kind === 'lap' || Array.isArray(g.lap_members))) : [];
                     const mism = laps.filter((g) => g.lap_evaluable === false);
                     const two = laps.filter((g) => Array.isArray(g.lap_members) && g.lap_members.length === 2 && g.lap_members[0].section_id !== g.lap_members[1].section_id);
                     if (laps.length) {
+                        // 검증 2026-11-28 의 8: 부재 하나라도(또는 구간이) 불합격이면 fail, 평가하지 못한 부재 · 구간(춤이 다름 포함)이 있으면 판정 없음(warn) — 합격으로 두지 않는다
+                        const lapFail = laps.some((g) => (g.result && g.result.pass === false) || (Array.isArray(g.lap_members) && g.lap_members.some((m) => m && m.pass === false)));
+                        const lapNe = laps.filter((g) => !(g.result && (g.result.pass === true || g.result.pass === false))
+                            || (Array.isArray(g.lap_members) && g.lap_members.some((m) => m && m.pass !== true && m.pass !== false)));
                         checks.push({
                             category: catF, item: '랩 — 두 부재 (강성의 몫)',
-                            status: mism.length ? 'warn' : 'pass',
+                            status: lapFail ? 'fail' : ((mism.length || lapNe.length) ? 'warn' : 'pass'),
                             value: two.length ? two.slice(0, 4).map((g) => _koText(g.label || g.id) + ': ' + g.lap_members.map((m) => m.section_id + ' ' + (Number(m.share) * 100).toFixed(1) + '%').join(' | ')).join('; ') : '같은 단면끼리(절반씩)',
                             criterion: 'M_i = M · I_i / (I_1 + I_2) — 부재마다 그 단면으로, 지배 부재가 판정(결정 S3). 설계 매뉴얼의 강도의 합은 참고',
-                            note: mism.length ? '춤이 다른 두 부재의 랩 ' + mism.length + ' 구간은 평가하지 못함(결정 S4).' : '',
+                            note: [lapFail ? '불합격인 랩 부재가 있음 — 구간의 지배 부재를 확인하세요.' : '',
+                                mism.length ? '춤이 다른 두 부재의 랩 ' + mism.length + ' 구간은 평가하지 못함(결정 S4).' : '',
+                                lapNe.length > mism.length ? '판정 없는 랩 구간 · 부재가 있음(' + lapNe.filter((g) => g.lap_evaluable !== false).map((g) => _koText(g.label || g.id)).slice(0, 4).join('; ') + ').' : '']
+                                .filter(Boolean).join(' '),
                         });
                     }
                 }

@@ -91,6 +91,21 @@
 
 **하지 않은 것.** 랩 도구에 `Mnd_2` · `h_web_2` 는 보내지 않는다(첫째 부재의 것도 지금 보내지 않는다). 서명곡선의 기억은 메모리뿐(파일을 열면 단면마다 다시 푼다). `get_full_state` 와 보기 계약에 단면 목록이 없다. 좁은 왼쪽 단에서 단면 목록 표가 옆으로 밀린다. `I_span_in4` 를 사람이 넣으면 랩의 몫은 넣은 값에서(엔진을 따른다).
 
+### V — 독립 검증이 찾은 결함 고침(커밋 전)
+
+| # | 무엇이 틀렸나(재현) | 고친 것 | 시험(`span_sections_contract` P0 · P6) |
+|---|---|---|---|
+| 1 | 랩 없이 단면이 바뀌는 지점의 §G5 · §H3 을 단면 하나로(S1\|S1\|S2\|S2, S2 t 0.050 — 지점 3 을 S1 로만 0.560 / 0.686) | 지점에서 만나는 두 경간의 단면마다 — 그 단면의 다른 구간에 지점을 붙인다(없으면 평가하지 못함 `host.purlin.support_section_unchecked`). 결과 `support_sections_checked[]`, 가정 `host.purlin.support_section_change` | 지점 3: S1 0.560 / 0.686 합격 · S2 1.158 / 1.322 불합격, 거울 꼴 · 끝 지점 |
+| 2 | 주지 않은 단면 치수 → 엔진의 처음 값(qlip 90 · r 0) | `designState.fillSectionDims` — S1(모델의 템플릿 치수)의 값으로 채워 상태에 적고 답에 `host.case.section_dims_from_s1`(부른 쪽 단위). S1 에도 없으면 오류(`host.case.section_dims_missing`). design_purlin · analyze_loads · set_case_inputs | `[{t: 0.085}]` → 나머지 S1, US · SI 글, S1 을 고쳐도 S2 그대로, r 없는 모델 → 오류 |
+| 3 | 퍼린 결과 없이 랩 접합 → S1 두 장(Pns 1.187) | `utils.lapMembersFromSections`(화면 · 호스트 한 함수) — 지점의 두 경간 단면의 t · 깊이(Se · Vn · Ix 는 없음 → 평가하지 못함), `host.lap.members_from_list`. 지점이 없고 단면이 다르면 거절 | 지점 2: t 0.070 · t_2 0.059 → Pns 0.918, 빈 지점 → 거절 |
+| 4 | 경간 표를 span_sections 없이 → 말없이 모두 S1 | 그 답에 `host.case.span_sections_reset`, 목록이 있는데 모두 S1 인 퍼린 · 하중 결과에 `host.purlin.sections_listed_unused` | P1(그 한 줄 밖은 같다) · P6 |
+| 5 | 목록이 없는 처음 길에서 경간 수를 바꾸면 「경간 n 단면」 필드 | 없는 자리는 S1 | 4 → 5 경간: 단면 필드 없음 |
+| 6a | analyze_loads 기본 답 121.3 KB | 요약에 경간마다 짧은 줄(`i621_by_span` · `deck_by_span`), 맞지 않는 조건 글은 한 번, 전체는 detail:'full'(server.ts) | 95.2 KB |
+| 6b | 퍼린 요약 40 KiB 를 지키는 것이 없음(6 경간 52 KB) | 넘을 때만: 합격 · 지배 아님 구간 줄을 가장 작은 꼴로, more 에 그 id 와 얻는 곳. 그래도 넘으면 more 에 | 6 경간 · 3 단면 SI 32.7 KB, 한 단면 4 경간 37,547 B 그대로 |
+| 7 | 어느 경간도 S1 이 아니면 맨 위 props · cutwp(모델) 와 dsm(S2) 가 섞임 | 모두 한 단면(S1 이 쓰이면 S1, 아니면 첫 경간) + `top_level_section_id`, MCP 요약의 more 가 그 id 를 든다 | 모두 S2 → props · dsm = S2 |
+| 8 | 점검: 내민 경간의 R 없음에 경고, 랩 부재 불합격에도 합격 | 내민 경간(real_span false)은 「해당 없음」, 랩: 부재 불합격 → fail, 판정 없음 · 춤 다름 → warn | 옛 review.js 로 확인(합격 · 경고) → fail · pass |
+| 9 | 지점을 비운 랩 도구의 「지배 랩」 이 평가한 랩만 견준 것을 말하지 않음 | 고르는 규칙 그대로, 알림 `host.lap.governing_support_partial`(평가한 중력 랩 가운데 · 평가하지 못한 랩 · 넣지 않은 양력 랩) | 지점 3, 지점 2 · 4 의 랩을 든다 |
+
 (뒤 단계는 끝나면 적는다)
 
 ---

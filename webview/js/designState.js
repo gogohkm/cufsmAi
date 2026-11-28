@@ -404,6 +404,33 @@
         if (missing.length) { return { missing }; }
         return { data: { span_sections: ids.slice(), sections: out }, missing: [] };
     }
+    /**
+     * 검증 2026-11-28 의 2: AI 도구(design_purlin · analyze_loads · set_case_inputs 의 sections)가 주지 않은 치수(없음 · null)는 S1(모델 — 그 템플릿의
+     * 치수)의 값으로 채운다 — 말없이 엔진의 처음 값(qlip 90 · r 0)이 쓰이지 않게. 채운 값은 그 단면의 params 에 적어 상태에 남는다(뒤에 S1 을
+     * 고쳐도 S2 는 바뀌지 않는다). S1 에도 그 치수가 없으면 그 단면 · 그 치수를 든 오류.
+     * list: [{id, template, params}] (US), modelParams: 모델의 sectionParams. 반환 { list, filled: [{id, dims: {k: v}}], errors: [] }
+     */
+    function fillSectionDims(list, modelParams) {
+        const out = [], filled = [], errors = [];
+        const mp = modelParams && typeof modelParams === 'object' ? modelParams : {};
+        (Array.isArray(list) ? list : []).forEach((s) => {
+            if (!s || typeof s !== 'object' || Array.isArray(s)) { out.push(s); return; }
+            const keys = SECTION_TEMPLATE_PARAMS[s.template] || [];
+            const params = Object.assign({}, s.params && typeof s.params === 'object' ? s.params : {});
+            const dims = {};
+            keys.forEach((k) => {
+                const v = params[k];
+                if (typeof v === 'number' && isFinite(v)) { return; }
+                if (v !== undefined && v !== null) { return; }   // 수가 아닌 값은 검사(validateSections)가 막는다
+                const m = mp[k];
+                if (typeof m === 'number' && isFinite(m)) { params[k] = m; dims[k] = m; }
+                else { errors.push('section ' + (s.id || '?') + ': ' + (SECTION_PARAM_LABELS[k] || k) + ' (' + k + ') is not given and S1 (the model) has no value for it — give ' + k); }
+            });
+            if (Object.keys(dims).length) { filled.push({ id: s.id || null, dims }); }
+            out.push(Object.assign({}, s, { params }));
+        });
+        return { list: out, filled, errors };
+    }
     /** 모든 경간이 S1 이고 추가 단면이 없나(그때 본문 · 파일은 이 기능이 없던 때와 같다) */
     function sectionsAreDefault(spanSections, sections) {
         return (!Array.isArray(spanSections) || spanSections.every((x) => x === 'S1')) && (!Array.isArray(sections) || sections.length === 0);
@@ -1017,6 +1044,7 @@
         sectionIds,
         validateSections,
         sectionsAreDefault,
+        fillSectionDims,
         spanSectionsPayload,
         normalizeSection,
         collectSections,

@@ -101,7 +101,35 @@ function pureChecks(ctx) {
   const body = U.applyLapTwoMembers({ d: 9, t: 0.07, Se: 9, Sf: 9, Vn: 9 }, two);
   assert.deepStrictEqual(body, { d: 9, t: 0.07, Se: 2.47, Sf: 2.7, Vn: 5, t_2: 0.059, d_2: 9, Se_2: 1.89, Sf_2: 2.3, Vn_2: 4, Ixx: 12.2, Ixx_2: 10.3 }, 'two-member lap body ' + JSON.stringify(body));
   assert.strictEqual(U.lapTwoMembers({ regions: [] }, 2, {}), null, 'not a per-span result → null');
-  notes.push('P0: default all S1, payload rules, state rules (removed → S1, span count → S1), file / fp unchanged by default, labels, lap two members');
+  // 검증 2026-11-28 의 5: 단면 목록이 없는 처음 길 — 경간 수를 바꿔도 「경간 n 단면」 필드가 생기지 않는다(이 기능 전과 같은 필드)
+  const d4 = CS.applyChanges(CS.createCaseState(), { spanType: 'cont-4' }, 'user').state;
+  const d5 = CS.applyChanges(d4, { spanType: 'cont-n', nSpans: 5 }, 'user').state;
+  const f45 = DF.diffSnapshots(snap(d4), snap(d5)).fields;
+  assert(f45.length > 0 && !f45.some((f) => /spanSections|sections\[/.test(f.path)), 'default path: no span-section field ' + JSON.stringify(f45.map((f) => f.path)));
+  const s5 = CS.applyChanges(d5, { sections: [S2], spanSections: ['S1', 'S1', 'S1', 'S1', 'S2'] }, 'user').state;
+  assert(DF.diffSnapshots(snap(s5), snap(d4)).fields.some((f) => f.path === 'case.spans.spanSections[4]' && f.from === 'S2' && f.to === 'S1'), 'a missing index is S1');
+  // 검증 2026-11-28 의 2: 주지 않은 치수는 S1 의 값(채운 그대로 — 단면마다 알림), S1 에도 없으면 그 단면 · 치수를 든 오류
+  const fl = DS.fillSectionDims([{ id: 'S2', template: 'lippedc', params: { H: null, B: null, D: null, t: 0.085, r: null, qlip: null } }], C070);
+  assert.deepStrictEqual(fl.list[0].params, { ...C070, t: 0.085 }, 'filled from S1');
+  assert.deepStrictEqual(fl.filled, [{ id: 'S2', dims: { H: 9, B: 2.5, D: 0.8, r: 0.1875, qlip: 90 } }]);
+  const fe = DS.fillSectionDims([{ id: 'S3', template: 'lippedc', params: { t: 0.06 } }], { H: 9, B: 2.5, D: 0.8, t: 0.07 });
+  assert(fe.errors.length === 2 && /section S3: 모서리 r \(r\)/.test(fe.errors[0]) && /qlip/.test(fe.errors[1]), 'S1 has no r / qlip → error ' + fe.errors);
+  // 검증 2026-11-28 의 3: 퍼린 결과 없이 단면 목록에서 랩의 두 부재(t · 깊이), 지점이 없고 단면이 다르면 오류, 모두 S1 이면 null, 모두 같은 단면이면 그 단면 둘
+  const s1d = { template: 'lippedc', H: 9, B: 2.5, t: 0.07 };
+  const lm = U.lapMembersFromSections(['S1', 'S2', 'S2', 'S1'], [S2], s1d, 2);
+  assert(lm.from_list && lm.members[0].t === 0.07 && lm.members[1].t === 0.059 && lm.members[1].d === 9 && !lm.allS1 && !lm.same && lm.members.every((m) => m.Se === null), 'members from the list ' + JSON.stringify(lm));
+  assert.deepStrictEqual(U.applyLapTwoMembers({ d: 9, t: 0.07 }, lm), { d: 9, t: 0.07, t_2: 0.059, d_2: 9 }, 'body: t_2 · d_2 only');
+  assert(/connLapSupport/.test(U.lapMembersFromSections(['S1', 'S2', 'S2', 'S1'], [S2], s1d, null).error), 'blank support, different sections → error');
+  assert.strictEqual(U.lapMembersFromSections(['S1', 'S1'], [S2], s1d, null), null, 'all S1 → null');
+  assert(U.lapMembersFromSections(['S2', 'S2'], [S2], s1d, null).members.every((m) => m.section_id === 'S2' && m.t === 0.059), 'one section everywhere → that section');
+  assert(U.lapMembersFromSections(['S1', 'S2', 'S2', 'S1'], [S2], s1d, 2).allS1 === false && U.lapMembersFromSections(['S1', 'S1', 'S2'], [S2], s1d, 2).allS1 === true, 'support 2 between S1 and S1');
+  // 검증 2026-11-28 의 9: 지배 랩을 고른 근거 — 평가하지 못한 랩 · 양력 랩
+  const pc = { span_sections: ['S1', 'S2'], regions: [{ id: 'lap-1', kind: 'lap', support: 1, result: { utilization: 0.8, pass: true } }, { id: 'lap-2', kind: 'lap', support: 2, result: { utilization: null, pass: null } },
+    { id: 'uplift_lap-1', kind: 'uplift_support', support: 1, result: { utilization: 0.9, pass: true } }] };
+  const ch = U.governingLapChoice(pc);
+  assert(ch.support === 2 && ch.evaluated && ch.not_evaluated.map((g) => g.id).join() === 'lap-2' && ch.uplift_laps.map((g) => g.id).join() === 'uplift_lap-1' && U.governingLapSupport(pc) === 2, 'governing lap choice ' + JSON.stringify(ch));
+  notes.push('P0: default all S1, payload rules, state rules (removed → S1, span count → S1), file / fp unchanged by default, labels, lap two members; '
+    + 'default-path span count change has no span-section field, dimensions filled from S1 (or an error naming them), lap members from the list, governing-lap basis');
 }
 
 async function main() {
@@ -182,7 +210,11 @@ async function main() {
     assert.deepStrictEqual(oneB.body, one.body, 'S2 defined, every span S1: same screen body');
     assert.deepStrictEqual(oneB.loads, one.loads, 'same analyze_loads body');
     assert.deepStrictEqual(oneB.designs, one.designs, 'same region engine bodies');
-    assert.deepStrictEqual(strip(oneB.res), strip(one.res), 'same result');
+    // 검증 2026-11-28 의 4(b): 목록이 있는데 모든 경간 S1 — 결과에 「목록의 단면이 쓰이지 않음」 한 줄(그 밖은 같다)
+    const unusedN = (oneB.res.notices || []).find((n) => n && n.code === 'host.purlin.sections_listed_unused');
+    assert(unusedN && /S2/.test(unusedN.text) && oneB.res.warnings.includes(unusedN.text) && !(one.res.notices || []).some((n) => n && n.code === 'host.purlin.sections_listed_unused'), 'listed sections unused notice');
+    const dropUnused = (res) => ({ ...res, warnings: res.warnings.filter((t) => t !== unusedN.text), notices: (res.notices || []).filter((n) => n.code !== 'host.purlin.sections_listed_unused') });
+    assert.deepStrictEqual(strip(dropUnused(oneB.res)), strip(one.res), 'same result (but the unused-list notice)');
     notes.push(`P1: S2 defined, every span S1 → body, ${one.designs.length} region calls and result identical`);
 
     // ── P2: S2 = S1 의 치수 → 단면 하나와 같은 수 ──
@@ -329,6 +361,135 @@ async function main() {
     const ch = ok(await ai({ action: 'list_changes', limit: 40 }), 'list_changes');
     const titles = JSON.stringify(ch);
     assert(/경간 2 단면 S1 → S2|단면 S2 추가/.test(titles), 'change titles ' + titles.slice(0, 400));
+
+    // ── P6: 독립 검증(2026-11-28)이 찾은 것 ──
+    // 요약 · 그린 답의 목록은 {code, text}, detail:'full' 은 글 목록 + notices
+    const noteOf = (d, code) => [...(d.assumptions || []), ...(d.warnings || []), ...(d.not_evaluated || []), ...(Array.isArray(d.notices) ? d.notices : [])]
+      .find((x) => x && typeof x === 'object' && x.code === code);
+    // 4(a): 경간 표를 span_sections 없이 → 모든 경간 S1 이라고 그 답에
+    const resetN = noteOf(reset.data, 'host.case.span_sections_reset');
+    assert(resetN && /S2/.test(resetN.text), 'reset notice in the reply ' + JSON.stringify(reset.data.assumptions).slice(0, 400));
+    // 6(a): 하중 해석의 기본 답 — 경간마다 짧은 줄(§I6.2.1 · 데크), 전체는 detail:'full'
+    const alS = await tool('analyze_loads', { ...II1A, sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'] });
+    const alF = await tool('analyze_loads', { ...II1A, sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'], detail: 'full' });
+    const ib = alS.data.auto_params.i621_by_span, db = alS.data.auto_params.deck_by_span;
+    assert(ib.length === 4 && ib.every((b) => !('check' in b) && Object.keys(b).every((k) => ['span', 'section_id', 'R', 'real_span', 'failing'].includes(k))) && ib[1].section_id === 'S2', 'compact i621 rows ' + JSON.stringify(ib));
+    assert(db.every((d) => Object.keys(d).join() === 'span,section_id,kphi,kx'), 'compact deck rows ' + JSON.stringify(db));
+    assert(/i621_by_span/.test(alS.data.more) && /deck_by_span/.test(alS.data.more), 'more names the shortened blocks');
+    assert(alF.data.auto_params.i621_by_span[0].check && alF.data.auto_params.deck_by_span[0].kphi_method, 'full keeps the objects');
+    // 검증 때 121.3 KB(경간마다 §I6.2.1 검토 전부 17.8 KB · 데크 블록 5.3 KB) — 짧은 줄로 약 95 KB
+    assert(alS.bytes <= 100 * KB, `analyze_loads default reply ${alS.bytes} B`);
+    notes.push(`P6 4a · 6a: reset notice; analyze_loads default ${alS.bytes} B (full ${alF.bytes} B), per-span rows compact`);
+
+    // 1: 랩 없이 단면이 바뀌는 지점 — 지점에 얹힌 단면마다 §G5 · §H3(S1|S1|S2|S2, S2 t 0.050)
+    const thin = { id: 'S2', name: 'thin', ...C059, t: 0.050, D: 0.75 };
+    const wcBase = { ...II1A, loads: { D: 10, Lr: 45, W: -20 }, laps_per_support: [null, null, null, null, null], detail: 'full' };
+    const wcAt = (d, sup) => d.regions.flatMap((g) => (g.result.checks || []).filter((c) => c.check_point === `support ${sup}`)
+      .map((c) => ({ region: g.id, sec: c.location.section_id, wc: (c.design_checks || []).find((x) => x.id === 'member.web_crippling'), h3: (c.design_checks || []).find((x) => x.id === 'member.bending_web_crippling') })));
+    for (const [ss, label] of [[['S1', 'S1', 'S2', 'S2'], 'S1|S1|S2|S2'], [['S2', 'S2', 'S1', 'S1'], 'mirror']]) {
+      const wr = await tool('design_purlin', { ...wcBase, sections: [thin], span_sections: ss });
+      const at3 = wcAt(wr.data, 3);
+      const s2 = at3.find((x) => x.sec === 'S2'), s1 = at3.find((x) => x.sec === 'S1');
+      assert(s1 && s2 && s1.region !== s2.region, `${label}: support 3 checked with both sections ` + JSON.stringify(at3.map((x) => [x.region, x.sec])));
+      assert(s2.wc.verdict === 'fail' && Math.abs(s2.wc.ratio - 1.158) < 0.002 && Math.abs(s2.h3.ratio - 1.322) < 0.002, `${label}: S2 at support 3 G5 ${s2.wc.ratio} / H3 ${s2.h3.ratio}`);
+      assert(s1.wc.verdict === 'pass' && Math.abs(s1.wc.ratio - 0.560) < 0.002 && Math.abs(s1.h3.ratio - 0.686) < 0.002, `${label}: S1 at support 3 G5 ${s1.wc.ratio} / H3 ${s1.h3.ratio}`);
+      const ssc = wr.data.support_sections_checked;
+      assert(ssc.length === 1 && ssc[0].support === 3 && ssc[0].pass === false && ssc[0].sections_checked.map((x) => x.section_id).sort().join() === 'S1,S2', 'support_sections_checked ' + JSON.stringify(ssc));
+      assert(noteOf(wr.data, 'host.purlin.support_section_change'), 'support section rule cited');
+      // 끝 지점: 그 경간의 단면 하나
+      assert.deepStrictEqual(wcAt(wr.data, 1).map((x) => x.sec), [ss[0]], 'end support 1'); assert.deepStrictEqual(wcAt(wr.data, 5).map((x) => x.sec), [ss[3]], 'end support 5');
+      assert(wr.data.pass === false, 'fail wins');
+    }
+    notes.push('P6 1: support 3 of S1|S1|S2|S2 (and mirrored) checked with S1 (G5 0.560 / H3 0.686 pass) and S2 (1.158 / 1.322 fail); end supports with their span section');
+
+    // 7: 어느 경간도 S1 이 아니면 맨 위 단면 값은 첫 경간의 단면 하나의 것(top_level_section_id)
+    const allS2 = await tool('design_purlin', { ...wcBase, sections: [thin], span_sections: ['S2', 'S2', 'S2', 'S2'] });
+    const b2 = allS2.data.sections.find((x) => x.id === 'S2');
+    assert(allS2.data.top_level_section_id === 'S2' && allS2.data.props.Ixx === b2.props.Ixx && allS2.data.dsm_negative.Mxxcrl === b2.dsm_neg.Mxxcrl && allS2.data.dsm_positive.Mxxcrd === b2.dsm_pos.Mxxcrd,
+      'top level = S2 ' + JSON.stringify([allS2.data.top_level_section_id, allS2.data.props.Ixx, b2.props.Ixx]));
+    const sumTop = await tool('run_case_check', { what: 'member' });
+    assert(sumTop.data.top_level_section_id === 'S2' && /section S2/.test(sumTop.data.more), 'summary names the top-level section');
+    assert(m.data.top_level_section_id === 'S1', 'S1 used → S1');
+    notes.push(`P6 7: all spans S2 → top-level props / dsm of S2 (Ixx ${b2.props.Ixx.toFixed(3)})`);
+
+    // 2: 주지 않은 치수 — S1 의 값(「S1 과 같고 더 두껍게」), 상태에는 채운 값, 답에 알림(SI 로 그려진다)
+    const thick = await tool('design_purlin', { ...II1A, sections: [{ t: 0.085 }], span_sections: ['S2', 'S1', 'S1', 'S2'], units: 'US' });
+    assert.deepStrictEqual(p.__testGetCase().state.sections[0].params, { ...C070, t: 0.085 }, 'stored params complete');
+    const dimN = noteOf(thick.data, 'host.case.section_dims_from_s1');
+    assert(dimN && /qlip = 90/.test(dimN.text) && /r = 0\.1875 in/.test(dimN.text), 'dims-from-S1 notice ' + JSON.stringify(dimN));
+    const thickSI = ok(await ai({ action: 'set_case_inputs', units: 'SI', inputs: {}, sections: [{ id: 'S2', template: 'lippedc', params: { t: 2.159 } }], __reply: { units: 'SI' } }), 'set SI');
+    const dimSI = noteOf(thickSI, 'host.case.section_dims_from_s1');
+    assert(dimSI && /r = 4\.76\d* mm/.test(dimSI.text) && /H = 228\.6 mm/.test(dimSI.text) && Math.abs(p.__testGetCase().state.sections[0].params.t - 0.085) < 1e-12, 'SI notice ' + JSON.stringify(thickSI).slice(0, 400));
+    const setN = ok(await ai({ action: 'set_case_inputs', inputs: {}, sections: [{ id: 'S2', template: 'lippedc', params: { t: 0.08 } }], __reply: { units: 'US' } }), 'set_case_inputs fill');
+    assert(setN.accepted.includes('sections') && setN.assumptions.some((x) => x.code === 'host.case.section_dims_from_s1') && p.__testGetCase().state.sections[0].params.qlip === 90, 'set_case_inputs fills from S1');
+    // 뒤에 S1 을 고쳐도 S2 는 그대로
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { ...C070, r: 0.25 } }), 'S1 r 0.25');
+    assert.strictEqual(p.__testGetCase().state.sections[0].params.r, 0.1875, 'S2 keeps its r');
+    // S1 에도 없는 치수 → 그 단면 · 그 치수를 든 오류
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { H: 9, B: 2.5, D: 0.8, t: 0.07 } }), 'S1 without r / qlip');
+    const noR = await call('design_purlin', { ...II1A, sections: [{ id: 'S2', t: 0.06 }], span_sections: ['S1', 'S2', 'S2', 'S1'] });
+    assert((noR.isError || noR.data.error) && /section S2: 모서리 r \(r\) is not given/.test(noR.text), 'missing in S1 → error ' + noR.text.slice(0, 300));
+    const noRset = ok(await ai({ action: 'set_case_inputs', inputs: {}, sections: [{ id: 'S2', template: 'lippedc', params: { t: 0.06 } }] }), 'set without r');
+    assert(noRset.rejected.some((x) => x.key === 'sections' && x.reason_code === 'host.case.section_dims_missing'), 'set_case_inputs refuses');
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { ...C070 } }), 'template x070 again');
+    notes.push('P6 2: sections [{t: 0.085}] → H B D r qlip from S1 (stored, notice in US / SI), S1 edit leaves S2, no value in S1 → error naming S2 / r');
+
+    // 3: 랩 접합 — 퍼린 결과 없이(단면 목록을 바꿔 지웠다) 지점 2(S1 | S2): 두 부재 x070 / x059, Pns 0.918 kip(전: 1.187 — 두 장 모두 x070)
+    ok(await ai({ action: 'set_case_inputs', inputs: { connLapSupport: 2, connLapPnvs: 5.0 }, sections: [{ id: 'S2', name: '9CS2.5x059', template: 'lippedc', params: { ...C059 } }], spans: { spanSections: ['S1', 'S2', 'S2', 'S1'] } }), 'lap inputs, no purlin');
+    engine.length = 0;
+    const lapNo = await tool('run_case_check', { what: 'lap', detail: 'full' });
+    const lbNo = sent('lap_connection').pop().params;
+    assert(lbNo.t === 0.07 && lbNo.t_2 === 0.059 && lbNo.d_2 === 9 && !('Se_2' in lbNo) && !('Ixx_2' in lbNo), 'lap body from the list ' + JSON.stringify(lbNo));
+    const pnsNo = lapNo.data.Pns ?? (lapNo.data.fastener && lapNo.data.fastener.Pns);
+    assert(Math.abs(pnsNo - 0.918) < 0.0015, 'Pns 0.918 (two sheets x070 | x059 — was 1.187 for two x070) ' + JSON.stringify(pnsNo));
+    assert(noteOf(lapNo.data, 'host.lap.members_from_list') && lapNo.data.section_source.members.length === 2, 'members-from-list notice');
+    assert(lapNo.data.pass !== true, 'lap without Se is not a pass');
+    ok(await ai({ action: 'set_case_inputs', inputs: { connLapSupport: null } }), 'blank lap support');
+    const lapRef = await call('run_case_check', { what: 'lap' });
+    assert((lapRef.isError || lapRef.data.error) && /connLapSupport/.test(lapRef.text), 'blank support, no purlin → refused ' + lapRef.text.slice(0, 300));
+    notes.push(`P6 3: lap at support 2 without a purlin result → t ${lbNo.t} | t_2 ${lbNo.t_2}, Pns ${pnsNo} kip; blank support refused`);
+
+    // 9: 지점을 비우고 퍼린 결과의 지배 랩 — 양력 랩은 넣지 않았다고 · 평가하지 못한 랩이 있으면 그 랩을 들어
+    ok(await ai({ action: 'set_case_inputs', inputs: {}, sections: [{ id: 'S2', name: null, template: 'lippedc', params: { ...C059, H: 10 } }] }), 'S2 deeper (laps 1, 3 not evaluated)');
+    await tool('run_case_check', { what: 'member' });
+    const lapG = await tool('run_case_check', { what: 'lap', detail: 'full' });
+    const gN = noteOf(lapG.data, 'host.lap.governing_support_partial');
+    const gKo = gN && (gN.text_ko || gN.text);
+    assert(gN && /평가한 중력 랩 가운데/.test(gKo) && /평가하지 못한 랩/.test(gKo) && /지점 2 왼쪽/.test(gKo) && /양력 랩/.test(gKo) && lapG.data.section_source.support === 3, 'honest governing lap notice ' + JSON.stringify(gN));
+    notes.push(`P6 9: governing lap (support ${lapG.data.section_source.support}) chosen among the evaluated gravity laps — notice names the laps not evaluated and the uplift laps`);
+
+    // 8: 검증 항목 — 랩 부재가 불합격이면 fail, 춤이 다른 랩은 판정 없음(warn), 내민 경간의 R 없음은 경고가 아니다
+    const v8 = ok(await ai({ action: 'validate_design', detail: 'full' }), 'validate (depth mismatch)');
+    const it8 = (vv, id) => (vv.items || vv.validation || []).find((c) => c.id === id);
+    assert.strictEqual(it8(v8, 'val.load_analysis.lap_members').status, 'warn', 'depth mismatch → not evaluated (warn)');
+    ok(await ai({ action: 'set_case_inputs', inputs: {}, sections: [{ id: 'S2', name: 'thin', template: 'lippedc', params: { ...C059, t: 0.040, D: 0.75 } }] }), 'S2 very thin');
+    const failRun = await tool('design_purlin', { ...II1A, loads: { D: 15, Lr: 140, W: -144 }, span_sections: ['S1', 'S2', 'S2', 'S1'], detail: 'full' });
+    assert(failRun.data.regions.some((g) => Array.isArray(g.lap_members) && g.lap_members.some((x) => x.pass === false)), 'a lap member fails');
+    const v8b = ok(await ai({ action: 'validate_design', detail: 'full' }), 'validate (lap member fails)');
+    assert.strictEqual(it8(v8b, 'val.load_analysis.lap_members').status, 'fail', 'lap member fails → fail');
+    const ovh = await tool('design_purlin', { ...II1A, span_type: 'cont-n', n_spans: 4, spans_ft: [3, 25, 25, 3], supports: ['N', 'P', 'P', 'P', 'N'],
+      laps_per_support: [null, { left_ft: 0, right_ft: 2.0 }, { left_ft: 1.25, right_ft: 1.25 }, { left_ft: 2.0, right_ft: 0 }, null],
+      sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'], detail: 'full' });
+    const rBy = ovh.data.load_analysis.auto_params.uplift_R_by_span;
+    assert(rBy[0] === null && rBy[3] === null && rBy[1] !== null && rBy[2] !== null, 'overhang spans have no R ' + JSON.stringify(rBy));
+    const v8c = ok(await ai({ action: 'validate_design', detail: 'full' }), 'validate (overhangs)');
+    const ur = it8(v8c, 'val.load_analysis.uplift_r_span');
+    assert(ur.status === 'pass' && /해당 없음/.test(ur.value), 'overhang spans do not warn ' + JSON.stringify(ur));
+    notes.push('P6 8: lap_members warn (depth mismatch) · fail (a member fails); uplift_r_span pass with overhang spans ' + JSON.stringify(rBy));
+
+    // 6(b): 요약의 예산 — 6 경간 · 3 단면 SI ≤ 40 KiB(줄인 것을 more 에), 한 단면 4 경간은 줄이지 않는다
+    const S3x = { id: 'S3', name: '9CS2.5x080', ...C070, t: 0.080 };
+    const n6 = 6;
+    const laps6 = Array.from({ length: n6 + 1 }, (_, j) => (j === 0 || j === n6 ? null : { left_ft: 2.0, right_ft: 2.75 }));
+    await tool('design_purlin', { ...II1A, span_type: 'cont-n', n_spans: n6, spans_ft: Array(n6).fill(25), supports: undefined, laps_per_support: laps6,
+      sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }, S3x], span_sections: ['S3', 'S2', 'S1', 'S2', 'S1', 'S3'] });
+    const big = await tool('run_case_check', { what: 'member', units: 'SI' });
+    assert(big.bytes <= 40 * KB && /Over the 40960 B summary budget/.test(big.data.more), `6 spans / 3 sections SI summary ${big.bytes} B with the budget note`);
+    const shortLines = big.data.regions.filter((g) => !('label' in g));
+    assert(shortLines.length > 0 && shortLines.every((g) => g.pass === true && Object.keys(g).every((k) => ['id', 'kind', 'span', 'spans', 'section_id', 'ratio', 'pass'].includes(k))), 'shortened lines are passing minimal lines');
+    assert(big.data.regions.filter((g) => g.pass !== true).every((g) => 'label' in g) && ('label' in big.data.regions.find((g) => g.id === big.data.governing.id)), 'fail / not-evaluated / governing lines kept');
+    notes.push(`P6 6b: 6 spans / 3 sections SI summary ${big.bytes} B (${shortLines.length} passing lines shortened); single-section 4 spans ${sumOne.bytes} B untouched`);
+    assert(!/summary budget/.test(sumOne.data.more) && sumOne.bytes <= 40 * KB, 'single-section 4-span summary untouched');
   } finally {
     S.writerKeyDir = saveKey; S.projectRoots = saveRoots;
     try { await client.close(); } catch { /* 닫힘 */ }
